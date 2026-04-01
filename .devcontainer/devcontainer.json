@@ -1,0 +1,33 @@
+{
+    "name": "ROS 2 armSorter",
+    "build": {
+        "dockerfile": "../Dockerfile",
+        "context": ".."
+    },
+    "features": {
+        "ghcr.io/devcontainers/features/common-utils:1": {
+            "configureZshAsDefaultShell": true
+        }
+    },
+    "runArgs": [
+        "--platform", "linux/amd64",
+        "--privileged"
+    ],
+    "containerEnv": {
+        "GIT_EDITOR": "code --wait"
+    },
+    "workspaceMount": "source=${localWorkspaceFolder},target=/root/armSorter,type=bind",
+    "workspaceFolder": "/root/armSorter",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-iot.vscode-ros",
+                "ms-vscode.cpptools",
+                "ms-python.python",
+                "redhat.vscode-yaml"
+            ]
+        }
+    },
+    "postCreateCommand": "echo 'source /opt/ros/humble/setup.bash' >> ~/.bashrc && echo 'source /root/armSorter/install/setup.bash' >> ~/.bashrc",
+    "remoteUser": "root"
+}
