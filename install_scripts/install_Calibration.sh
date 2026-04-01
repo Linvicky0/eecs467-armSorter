@@ -16,3 +16,4 @@ cd ~
 git clone -b humble https://github.com/ros-perception/image_pipeline.git
 cd ~/image_pipeline
 colcon build --symlink-install
+grep -qxF "source ~/image_pipeline/install/setup.bash" ~/.bashrc || echo "source ~/image_pipeline/install/setup.bash" >> ~/.bashrc
