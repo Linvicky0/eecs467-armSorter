@@ -69,6 +69,8 @@ class RXArm(InterbotixManipulatorXS):
         super().__init__(robot_model="rx200")
         self.joint_names = self.arm.group_info.joint_names
         self.num_joints = 5
+        #gripper
+        self.gripper_state = True
         # State
         self.initialized = False
         # Cmd
