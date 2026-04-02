@@ -169,6 +169,31 @@ class StateMachineThread(QThread):
         self.sm=state_machine
 
     def run(self):
+    @param      dh_params     The dh parameters as a 2D list each row represents a link and has the format a, alpha, d, theta
+    @param      joint_angles  The joint angles of the links
+    @param      link          The link to transform from
+
+    @return     a transformation matrix representing the pose of the desired link
+    """
+    H = np.identity(4, dtype=np.float64)
+    for idx, t in enumerate(joint_angles):
+        a, alpha, d, theta = dh_params[idx]
+        if idx == link: break   # CHANGE: breaks when joint index == desired link, matrix computed
+
+        if alpha == -1:
+            alpha = t
+        elif theta == -1:  # maybe use if instead of elif, unless only one of them is guaranteed to be 0
+            theta = t
+        A = get_transform_from_dh(a, alpha, d, theta)
+        H = np.matmul(H, A)
+
+    pose = get_pose_from_T(H)
+    return pose
+
+
+def get_transform_from_dh(a, alpha, d, theta):
+    """!
+    @brief      Gets the transformation matri
         """!
         @brief      Update the state machine at a set rate
         """
