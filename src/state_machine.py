@@ -38,6 +38,13 @@ class StateMachine():
             [np.pi/2,         0.5,       0.3,     -np.pi/3,        0.0],
             [0.0,             0.0,       0.0,          0.0,        0.0]]
 
+        self.record_waypoints = []
+        self.record_gripper  = []
+        self.waypoint_played = False
+
+        self.world_pos = np.empty((3,3))
+        self.pick_size = -1
+
     def set_next_state(self, state):
         """!
         @brief      Sets the next state.
@@ -81,6 +88,19 @@ class StateMachine():
         if self.next_state == "manual":
             self.manual()
 
+        if self.next_state == "record":
+            self.record()
+        
+        if self.next_state == "play":
+            self.play()
+
+        if self.next_state == "pick":
+            self.pick()
+
+        if self.next_state == "place":
+            self.place()
+        
+
 
     """Functions run for each state"""
 
@@ -113,15 +133,115 @@ class StateMachine():
               Make sure you respect estop signal
         """
         self.status_message = "State: Execute - Executing motion plan"
+        self.rxarm.estop = False 
+        self.rxarm.enable_torque()
+
         for item in self.waypoints:
             if (self.rxarm.estop):
                 self.next_state = "estop"
                 return
             self.rxarm.set_positions(item)
+            # self.rxarm.arm.set_joint_positions(item,
+            #                      moving_time=2,
+            #                      accel_time=0.5,
+            #                      blocking=False)
             time.sleep(2)
 
         self.next_state = "idle"
 
+    
+    def record(self):
+        self.status_message = "State: Record - Recording waypoints"
+        self.current_state = "record"
+        if self.waypoint_played:
+            self.record_waypoints = []
+            self.record_gripper = []
+            self.waypoint_played = False
+        self.record_waypoints.append(self.rxarm.get_positions())
+        self.record_gripper.append(self.rxarm.gripper_state)
+        self.next_state = "idle"
+
+
+    def play(self):
+        self.status_message = "State: Play - Executing recorded motion plan"
+        self.current_state = "play"
+        
+        self.rxarm.estop = False
+        self.rxarm.enable_torque()
+        self.waypoint_played = True
+        for idx, point in enumerate(self.record_waypoints):
+            gripper_state = self.record_gripper[idx]
+            move_time = 2.0
+            ac_time = 0.5
+            
+            if idx > 0:
+                pre_point = self.record_waypoints[idx - 1]
+                displacement = point - pre_point
+                angular_t = np.abs(displacement) / (np.pi / 5)
+                move_time = np.max(angular_t)
+                ac_time = move_time / 4.0
+
+                self.rxarm.arm.set_joint_positions(point,
+                                 moving_time=move_time,
+                                 accel_time=ac_time,
+                                 blocking=True)
+            time.sleep(2)
+            if self.next_state == "estop":
+                break
+            if gripper_state != self.rxarm.gripper_state:
+                if gripper_state:
+                    self.rxarm.open_gripper()
+                    self.rxarm.gripper_state = True
+                else:
+                    self.rxarm.close_gripper()
+                    self.rxarm.gripper_state = False
+        if not self.next_state == "estop":
+            self.next_state = "idle"
+            
+
+    def pick(self):
+        self.status_message = "State: Pick - Click to pick"
+        self.current_state = "pick"
+        self.camera.new_click = False
+        print("[CLICK PICK] Please click one point to pick...")
+        while not self.camera.new_click:
+            rospy.sleep(0.05)
+        
+        self.camera.new_click = False
+        pt = self.camera.last_click
+        z = self.camera.DepthFrameRaw[pt[1]][pt[0]]
+        click_uvd = np.append(pt, z)
+        target_world_pos, block_ori = self.get_block_xyz_from_click(click_uvd)
+
+        self.rxarm.go_to_home_pose(moving_time=2,
+                                    accel_time=0.5,
+                                    blocking=True)
+        
+        self.auto_pick(target_world_pos, block_ori)
+        if not self.next_state == "estop":
+            self.next_state = "idle"
+
+    def place(self):
+        self.status_message = "State: Place - Click to place"
+        self.current_state = "place"
+        self.camera.new_click = False
+        print("[CLICK PLACE]    Please click one point to pick...")
+        while not self.camera.new_click:
+            rospy.sleep(0.1)
+        
+        self.camera.new_click = False
+        pt = self.camera.last_click
+        z = self.camera.DepthFrameRaw[pt[1]][pt[0]]
+        click_uvd = np.append(pt, z)
+        target_world_pos, block_ori = self.get_block_xyz_from_click(click_uvd)
+
+        self.auto_place(target_world_pos, block_ori)
+
+        if not self.next_state == "estop":
+            self.next_state = "idle"
+
+
+    
     def calibrate(self):
         """!
         @brief      Gets the user input to perform the calibration

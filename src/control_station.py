@@ -94,6 +94,22 @@ class Gui(QMainWindow):
         self.ui.btnUser3.setText('Execute')
         self.ui.btnUser3.clicked.connect(partial(nxt_if_arm_init, 'execute'))
 
+        self.ui.btnUser5.setText('Record Waypoint')
+        self.ui.btnUser5.clicked.connect(partial(nxt_if_arm_init, 'record'))
+        self.ui.btnUser6.setText('Play Waypoints')
+        self.ui.btnUser6.clicked.connect(partial(nxt_if_arm_init, 'play'))
+        self.ui.btnUser7.setText('Detect Blocks')
+        self.ui.btnUser7.clicked.connect(partial(nxt_if_arm_init, 'detect'))
+        self.ui.btnUser10.setText('Click Clean')
+        self.ui.btnUser10.clicked.connect(partial(nxt_if_arm_init, 'clean'))
+        self.ui.btnUser11.setText('Click Grab')
+        self.ui.btnUser11.clicked.connect(partial(nxt_if_arm_init, 'pick'))
+        self.ui.btnUser12.setText('Click Place')
+        self.ui.btnUser12.clicked.connect(partial(nxt_if_arm_init, 'place'))
+        self.ui.btnUser9.setText('Test')
+        self.ui.btnUser9.clicked.connect(partial(nxt_if_arm_init, 'task_test'))
+
+
         # Sliders
         for sldr in self.joint_sliders:
             sldr.valueChanged.connect(self.sliderChange)
