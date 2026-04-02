@@ -103,7 +103,7 @@ class StateMachine():
         @brief      Emergency stop disable torque.
         """
         self.status_message = "EMERGENCY STOP - Check rxarm and restart program"
-        self.current_state = "estop"
+        self.current_state = ""
         self.rxarm.disable_torque()
 
     def execute(self):
@@ -113,7 +113,15 @@ class StateMachine():
               Make sure you respect estop signal
         """
         self.status_message = "State: Execute - Executing motion plan"
+        for item in self.waypoints:
+            if self.rxarm.estop():
+                self.next_state = "estop"
+                return
+            
+            self.rxarm.set_positions(item)
+
         self.next_state = "idle"
+
 
     def calibrate(self):
         """!
