@@ -48,7 +48,8 @@ Not need to touch these files.
 - [src/resource](src/resource) - where we store the additional files used in the project
 
 ## How to start?
-- For mac users, download Docker Desktop, increase memory size to 8GB, open Docker Desktop, and run `build_docker.sh` to create a docker image. Now, run the install scripts in `cd ~/root/install_scripts/`. Upon exiting the container and reentering, run `docker start -i armlab-container`. Alternatively, download Dev Containers extension on VsCode, which can automatically make the workspace a Docker container and runs the dockerfile instead of manually running docker start.
+- For mac users, download Dev Containers extension on vscode, download Docker Desktop, increase memory size to 8GB, open Docker Desktop, open this repository, and wait for the reopen in container message to pop up. The Dev Containers extension allows vscode to automatically make the workspace a Docker container and runs the dockerfile instead of manually running docker start.
 
 1. Go to [/install_scripts](install_scripts) and following the `README.md` instructions
 2. Go to [/launch](launch) to start the ROS2 nodes with the `.sh` files following the `README.md` instructions
+   - Note: the launch files do not work if running on Docker and will get gnome-terminal command not found error. Consider opening a terminal and running each individual ros2 or python command (without the gnome-terminal command).
