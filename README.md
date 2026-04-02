@@ -52,4 +52,4 @@ Not need to touch these files.
 
 1. Go to [/install_scripts](install_scripts) and following the `README.md` instructions
 2. Go to [/launch](launch) to start the ROS2 nodes with the `.sh` files following the `README.md` instructions
-   - Note: the launch files do not work if running on Docker and will get gnome-terminal command not found error. Consider opening a terminal and running each individual ros2 or python command (without the gnome-terminal command).
+   - Note: the launch files do not work if running on Docker and will get gnome-terminal command not found error. Consider opening a terminal and running each individual ros2 or python3 command (without the gnome-terminal command).
