@@ -2,7 +2,10 @@
     "name": "ROS 2 armSorter",
     "build": {
         "dockerfile": "../Dockerfile",
-        "context": ".."
+        "context": "..",
+        "options": [
+            "--platform=linux/amd64"
+        ]
     },
     "features": {
         "ghcr.io/devcontainers/features/common-utils:1": {
@@ -16,7 +19,9 @@
     "containerEnv": {
         "GIT_EDITOR": "code --wait"
     },
-    "workspaceMount": "source=${localWorkspaceFolder},target=/root/armSorter,type=bind",
+    "mounts": [
+    "source=${localWorkspaceFolder}/src,target=/root/armSorter/src,type=bind"
+    ],
     "workspaceFolder": "/root/armSorter",
     "customizations": {
         "vscode": {
@@ -28,6 +33,6 @@
             ]
         }
     },
-    "postCreateCommand": "echo 'source /opt/ros/humble/setup.bash' >> ~/.bashrc && echo 'source /root/armSorter/install/setup.bash' >> ~/.bashrc",
+    "postCreateCommand": "echo 'source /opt/ros/humble/setup.bash' >> ~/.bashrc",
     "remoteUser": "root"
 }
