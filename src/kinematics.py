@@ -122,16 +122,7 @@ def get_pose_from_T(T):
     @return     The pose vector from T.
     """
     # returns the pose : (x,y,z,phi) required for FK output and IK input
-    xyz = T[:3, 3].flatten()
-    
-    R = T[:3, :3]
-    if abs(R[2, 2]) > 1:
-        phi = 0.0
-    else:
-        phi = np.arctan2(np.sqrt(1-R[2, 2]*R[2, 2]), R[2, 2])
-
-    pose = np.append(xyz, phi)
-    return pose
+    return [0, 0, 0, 0, 0, 0]
 
 
 def FK_pox(joint_angles, m_mat, s_lst):
@@ -230,7 +221,3 @@ def IK_geometric(dh_params, pose):
 
     return [theta1,theta2,theta3,theta4] # ignore theta5 (end effector's orientation) 
 
-
-
-
-    pass

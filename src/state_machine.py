@@ -123,7 +123,7 @@ class StateMachine():
         @brief      Emergency stop disable torque.
         """
         self.status_message = "EMERGENCY STOP - Check rxarm and restart program"
-        self.current_state = ""
+        self.current_state = "estop"
         self.rxarm.disable_torque()
 
     def execute(self):
@@ -185,8 +185,9 @@ class StateMachine():
                                  moving_time=move_time,
                                  accel_time=ac_time,
                                  blocking=True)
-            time.sleep(2)
-            if self.next_state == "estop":
+                time.sleep(3)   #3 seconds work last lasted, adjust for lower
+            if self.rxarm.estop:
+                self.next_state = "estop"
                 break
             if gripper_state != self.rxarm.gripper_state:
                 if gripper_state:
@@ -195,8 +196,9 @@ class StateMachine():
                 else:
                     self.rxarm.close_gripper()
                     self.rxarm.gripper_state = False
-        if not self.next_state == "estop":
-            self.next_state = "idle"
+        if self.rxarm.estop:
+            self.next_state = "estop"
+        self.next_state = "idle"
             
 
     def pick(self):
@@ -205,7 +207,7 @@ class StateMachine():
         self.camera.new_click = False
         print("[CLICK PICK] Please click one point to pick...")
         while not self.camera.new_click:
-            rospy.sleep(0.05)
+            time.sleep(0.05)
         
         self.camera.new_click = False
         pt = self.camera.last_click
@@ -218,8 +220,9 @@ class StateMachine():
                                     blocking=True)
         
         self.auto_pick(target_world_pos, block_ori)
-        if not self.next_state == "estop":
-            self.next_state = "idle"
+        if self.rxarm.estop:
+            self.next_state = "estop"
+        self.next_state = "idle"
 
     def place(self):
         self.status_message = "State: Place - Click to place"
@@ -227,7 +230,7 @@ class StateMachine():
         self.camera.new_click = False
         print("[CLICK PLACE]    Please click one point to pick...")
         while not self.camera.new_click:
-            rospy.sleep(0.1)
+            time.sleep(0.1)
         
         self.camera.new_click = False
         pt = self.camera.last_click
@@ -237,8 +240,9 @@ class StateMachine():
 
         self.auto_place(target_world_pos, block_ori)
 
-        if not self.next_state == "estop":
-            self.next_state = "idle"
+        if self.rxarm.estop:
+            self.next_state = "estop"
+        self.next_state = "idle"
 
 
     
@@ -288,31 +292,6 @@ class StateMachineThread(QThread):
         self.sm=state_machine
 
     def run(self):
-    @param      dh_params     The dh parameters as a 2D list each row represents a link and has the format a, alpha, d, theta
-    @param      joint_angles  The joint angles of the links
-    @param      link          The link to transform from
-
-    @return     a transformation matrix representing the pose of the desired link
-    """
-    H = np.identity(4, dtype=np.float64)
-    for idx, t in enumerate(joint_angles):
-        a, alpha, d, theta = dh_params[idx]
-        if idx == link: break   # CHANGE: breaks when joint index == desired link, matrix computed
-
-        if alpha == -1:
-            alpha = t
-        elif theta == -1:  # maybe use if instead of elif, unless only one of them is guaranteed to be 0
-            theta = t
-        A = get_transform_from_dh(a, alpha, d, theta)
-        H = np.matmul(H, A)
-
-    pose = get_pose_from_T(H)
-    return pose
-
-
-def get_transform_from_dh(a, alpha, d, theta):
-    """!
-    @brief      Gets the transformation matri
         """!
         @brief      Update the state machine at a set rate
         """
