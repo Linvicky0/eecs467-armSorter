@@ -78,8 +78,7 @@ class Gui(QMainWindow):
         nxt_if_arm_init = lambda next_state: self.sm.set_next_state(next_state)
         self.ui.btn_estop.clicked.connect(self.estop)
         self.ui.btn_init_arm.clicked.connect(self.initRxarm)
-        self.ui.btn_torq_off.clicked.connect(
-            lambda: self.rxarm.disable_torque())
+        self.ui.btn_torq_off.clicked.connect(lambda: self.rxarm.disable_torque())
         self.ui.btn_torq_on.clicked.connect(lambda: self.rxarm.enable_torque())
         self.ui.btn_sleep_arm.clicked.connect(lambda: self.rxarm.sleep())
         self.ui.btn_calibrate.clicked.connect(partial(nxt_if_arm_init, 'calibrate'))
@@ -88,11 +87,29 @@ class Gui(QMainWindow):
         # TODO: Add more lines here to add more buttons
         # To make a button activate a state, copy the lines for btnUser3 but change 'execute' to whichever state you want
         self.ui.btnUser1.setText('Open Gripper')
-        self.ui.btnUser1.clicked.connect(lambda: self.rxarm.gripper.release())
+        #self.ui.btnUser1.clicked.connect(lambda: self.rxarm.gripper.release())
+        self.ui.btnUser1.clicked.connect(lambda: self.rxarm.gripper_release())
         self.ui.btnUser2.setText('Close Gripper')
-        self.ui.btnUser2.clicked.connect(lambda: self.rxarm.gripper.grasp())
+      #  self.ui.btnUser2.clicked.connect(lambda: self.rxarm.gripper.grasp())
+        self.ui.btnUser2.clicked.connect(lambda: self.rxarm.gripper_grasp())
         self.ui.btnUser3.setText('Execute')
         self.ui.btnUser3.clicked.connect(partial(nxt_if_arm_init, 'execute'))
+
+        self.ui.btnUser5.setText('Record Waypoint')
+        self.ui.btnUser5.clicked.connect(partial(nxt_if_arm_init, 'record'))
+        self.ui.btnUser6.setText('Play Waypoints')
+        self.ui.btnUser6.clicked.connect(partial(nxt_if_arm_init, 'play'))
+        self.ui.btnUser7.setText('Detect Blocks')
+        self.ui.btnUser7.clicked.connect(partial(nxt_if_arm_init, 'detect'))
+        self.ui.btnUser10.setText('Click Clean')
+        self.ui.btnUser10.clicked.connect(partial(nxt_if_arm_init, 'clean'))
+        self.ui.btnUser11.setText('Click Grab')
+        self.ui.btnUser11.clicked.connect(partial(nxt_if_arm_init, 'pick'))
+        self.ui.btnUser12.setText('Click Place')
+        self.ui.btnUser12.clicked.connect(partial(nxt_if_arm_init, 'place'))
+        self.ui.btnUser9.setText('Test')
+        self.ui.btnUser9.clicked.connect(partial(nxt_if_arm_init, 'task_test'))
+
 
         # Sliders
         for sldr in self.joint_sliders:
