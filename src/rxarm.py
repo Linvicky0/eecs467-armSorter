@@ -116,6 +116,14 @@ class RXArm(InterbotixManipulatorXS):
         self.initialized = True
         return self.initialized
 
+    def gripper_release(self):
+        self.gripper.release()
+        self.gripper_state = True
+
+    def gripper_grasp(self):
+        self.gripper.grasp()
+        self.gripper_state = False
+
     def sleep(self):
         self.moving_time = 2.0
         self.accel_time = 1.0

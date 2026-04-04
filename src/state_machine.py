@@ -185,17 +185,18 @@ class StateMachine():
                                  moving_time=move_time,
                                  accel_time=ac_time,
                                  blocking=True)
-                time.sleep(3)   #3 seconds work last lasted, adjust for lower
+                time.sleep(0.2)   #0.2 seconds work last tested, adjust for lower
             if self.rxarm.estop:
                 self.next_state = "estop"
                 break
             if gripper_state != self.rxarm.gripper_state:
                 if gripper_state:
-                    self.rxarm.open_gripper()
-                    self.rxarm.gripper_state = True
+                    #self.rxarm.open_gripper()
+                    self.rxarm.gripper_release()
                 else:
-                    self.rxarm.close_gripper()
-                    self.rxarm.gripper_state = False
+                    #  self.rxarm.close_gripper()
+                    self.rxarm.gripper_grasp()
+            time.sleep(0.2) 
         if self.rxarm.estop:
             self.next_state = "estop"
         self.next_state = "idle"
