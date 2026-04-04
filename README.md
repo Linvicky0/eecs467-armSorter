@@ -64,4 +64,5 @@ Not need to touch these files.
 5. You should get something like this in the terminal
 `[realsense2_camera_node-1] [INFO] [1775329998.089389998] [camera.camera]: Open profile: stream_type: Color(0), Format: RGB8, Width: 1280, Height: 720, FPS: 30`
 `[realsense2_camera_node-1] [INFO] [1775329998.091468387] [camera.camera]: RealSense Node Is Up!`
-If the fornat is 640 x 40, that means the port is being treated as a USB 2.0, which means that you will have to unplug the camera and plug it in faster, or if that isn't work, potentially unplugging the USB-C connection from the camera and flipping it 180 degrees and plugging in might be a solution (haven't verified)
+If the fornat is 640 x 480, that means the port is being treated as a USB 2.0, which means that you will have to unplug the camera and plug it in faster, or if that isn't work, potentially unplugging the USB-C connection from the camera and flipping it 180 degrees and plugging in might be a solution (haven't verified)
+6. You can use 'ros2 topic list' to test if topic are being published. Then you can run `python3 src/camera.py`
