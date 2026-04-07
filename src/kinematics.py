@@ -121,6 +121,7 @@ def get_pose_from_T(T):
 
     @return     The pose vector from T.
     """
+    # returns the pose : (x,y,z,phi) required for FK output and IK input
     return [0, 0, 0, 0, 0, 0]
 
 
@@ -220,7 +221,3 @@ def IK_geometric(dh_params, pose):
 
     return [theta1,theta2,theta3,theta4] # ignore theta5 (end effector's orientation) 
 
-
-
-
-    pass

@@ -166,7 +166,24 @@ class Camera():
 
         @param      file  The file
         """
-        pass
+        if file is not None:
+            data = None
+            with open(file, "r") as stream:
+                data = yaml.safe_load(stream)
+            assert (data is not None)
+            self.intrinsic_matrix = np.asarray(data["camera_matrix"]["data"], dtype=DTYPE).reshape((3, 3))
+            self.distortion_coefficients = np.asarray(data["distortion_coefficients"]["data"], dtype=DTYPE).reshape(-1)
+        else:
+            self.intrinsic_matrix = np.array([925.27515, 0.0, 653.75928, 
+                                            0.0, 938.70001, 367.99236, 
+                                            0.0, 0.0, 1.0], dtype=DTYPE).reshape((3, 3))
+        self.extrinsic_matrix_inv = np.array([1,0,0,-20,
+                                            0, -1, 0, 211,
+                                            0, 0, -1, 974,
+                                            0, 0, 0, 1], dtype=DTYPE).reshape((4, 4))
+        self.extrinsic_matrix = np.linalg.pinv(self.extrinsic_matrix_inv)
+
+        self.intrinsic_matrix_inv = np.linalg.pinv(self.intrinsic_matrix)
 
     def blockDetector(self):
         """!
@@ -175,7 +192,80 @@ class Camera():
                     TODO: Implement your block detector here. You will need to locate blocks in 3D space and put their XYZ
                     locations in self.block_detections
         """
-        pass
+        self.block_detections.reset()
+        
+        # 1. Convert to grayscale and apply a slight blur to reduce noise
+        gray = cv2.cvtColor(self.ProcessVideoFrame, cv2.COLOR_RGB2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        
+        # 2. Use Canny edge detection to find the edges of the blocks
+        edged = cv2.Canny(blurred, 50, 150)
+        
+        # 3. Apply morphological closing to bridge gaps in the edge map
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        closed = cv2.morphologyEx(edged, cv2.MORPH_CLOSE, kernel)
+        
+        # 4. Mask out the robot arm and the area outside the board (matching your depth mask)
+        mask = np.zeros_like(closed, dtype=np.uint8)
+        cv2.rectangle(mask, (225, 90), (1083, 700), 255, cv2.FILLED)  # Active board area
+        cv2.rectangle(mask, (570, 400), (735, 700), 0, cv2.FILLED)    # Robot arm base
+        closed = cv2.bitwise_and(closed, mask)
+        
+        # 5. Find contours in the masked edge map
+        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2:]
+        self.block_detections.all_contours = contours
+        
+        for contour in contours:
+            M = cv2.moments(contour)
+            
+            # Reject false positive detections by area size
+            if M['m00'] < 200 or abs(M["m00"]) > 7000:
+                continue
+                
+            # Calculate pixel centroid
+            cx = int(M['m10'] / M['m00'])
+            cy = int(M['m01'] / M['m00'])
+            
+            # Ensure centroid is within image boundaries
+            if cx >= 1280 or cy >= 720 or cx < 0 or cy < 0:
+                continue
+                
+            # 6. Extract Z coordinate using the corresponding point in the depth map
+            cz = self.ProcessDepthFrameRaw[cy, cx]
+            if cz == 0:  # Skip if depth reading is invalid/zero
+                continue
+                
+            # Calculate Orientation
+            block_ori = -cv2.minAreaRect(contour)[2] 
+            
+            # Calculate World XYZ coordinates
+            block_xyz = self.coord_pixel_to_world(cx, cy, cz)
+            
+            # 7. Size classification and Z-offsetting (mirrored from your depth logic)
+            if M["m00"] < 850:
+                block_xyz[2] = block_xyz[2] - 12.5
+                self.block_detections.sizes.append(1)  # 1 for small
+            else:
+                block_xyz[2] = block_xyz[2] - 19
+                self.block_detections.sizes.append(0)  # 0 for large
+                
+            # 8. Get Block Color
+            block_color = self.retrieve_area_color(
+                self.ProcessVideoFrame, 
+                self.ProcessVideoFrameLab, 
+                self.ProcessVideoFrameHSV, 
+                contour
+            )
+            
+            # 9. Update the block_detections tracker
+            self.block_detections.uvds.append([cx, cy, cz])
+            self.block_detections.xyzs.append(block_xyz)
+            self.block_detections.contours.append(contour)
+            self.block_detections.thetas.append(np.deg2rad(block_ori))
+            self.block_detections.colors.append(block_color)
+            
+        # 10. Sort blocks natively by color as defined in your pipeline
+        self.block_detections.update("color")
 
     def detectBlocksInDepthImage(self):
         """!
@@ -183,7 +273,23 @@ class Camera():
 
                     TODO: Implement a blob detector to find blocks in the depth image
         """
-        pass
+        # 1. Take a copy of the raw depth frame
+        depth_img = self.DepthFrameRaw.copy()
+        
+        # 2. Threshold depth to isolate objects resting ON the table
+        # We assume the table sits at a higher depth value and blocks are closer.
+        # Note: You may need to adjust these threshold values depending on actual physical setup
+        mask = cv2.inRange(depth_img, 100, 950) 
+        
+        # 3. Clean up noise in the mask using morphological operations
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        mask_cleaned = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        
+        # 4. Find the contours of the detected block blobs
+        contours, _ = cv2.findContours(mask_cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Save contours to the class attribute so they can be drawn
+        self.block_contours = contours
 
     def projectGridInRGBImage(self):
         """!
@@ -196,6 +302,38 @@ class Camera():
         """
         modified_image = self.VideoFrame.copy()
         # Write your code here
+        # Extract X and Y coordinates from the meshgrid
+        X, Y = self.grid_points
+        X_flat = X.flatten()
+        Y_flat = Y.flatten()
+        
+        # Assume Z is 0 (grid is flat on the board frame)
+        Z_flat = np.zeros_like(X_flat)
+        ones = np.ones_like(X_flat)
+        
+        # Create homogeneous 3D world points matrix (Shape: 4 x N)
+        world_pts = np.vstack((X_flat, Y_flat, Z_flat, ones))
+        
+        # Transform points from World -> Camera frame using Extrinsic Matrix
+        # Note: Using extrinsic_matrix_inv mapping standard convention World to Camera
+        cam_pts = self.extrinsic_matrix_inv @ world_pts 
+        
+        # Extract 3D points in the camera frame (Drop homogeneous 1 for perspective projection)
+        cam_pts_3d = cam_pts[0:3, :]
+        
+        # Project into 2D pixel space using Intrinsic Matrix (Shape: 3 x N)
+        pixels_homogenous = self.intrinsic_matrix @ cam_pts_3d
+        
+        # Normalize by the Z coordinate
+        u = pixels_homogenous[0, :] / pixels_homogenous[2, :]
+        v = pixels_homogenous[1, :] / pixels_homogenous[2, :]
+        
+        # Draw the points on the image
+        for i in range(len(u)):
+            px, py = int(u[i]), int(v[i])
+            # Check bounds to ensure we are drawing onto the frame safely
+            if 0 <= px < 1280 and 0 <= py < 720:
+                cv2.circle(modified_image, (px, py), 4, (0, 255, 0), -1)
 
         self.GridFrame = modified_image
      
@@ -212,6 +350,25 @@ class Camera():
         """
         modified_image = self.VideoFrame.copy()
         # Write your code here
+        # Check if msg is valid and contains detections
+        if msg is not None and hasattr(msg, 'detections'):
+            for detection in msg.detections:
+                
+                # 1. Draw Center Point
+                cx = int(detection.centre.x)
+                cy = int(detection.centre.y)
+                cv2.circle(modified_image, (cx, cy), 5, (0, 0, 255), -1)
+                
+                # 2. Draw Tag ID
+                tag_id = str(detection.id)
+                cv2.putText(modified_image, f"ID: {tag_id}", (cx + 10, cy - 10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                
+                # 3. Draw Tag Corners
+                if hasattr(detection, 'corners'):
+                    pts = np.array([[int(pt.x), int(pt.y)] for pt in detection.corners], np.int32)
+                    pts = pts.reshape((-1, 1, 2))
+                    cv2.polylines(modified_image, [pts], isClosed=True, color=(255, 0, 0), thickness=2)
 
         self.TagImageFrame = modified_image
 
