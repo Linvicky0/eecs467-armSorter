@@ -96,8 +96,8 @@ def delete_tasks(task_indices, dir_name):
 
 
 if __name__ == "__main__":
-    # restart_dataset([TRAIN_DATA_DIR, TEST_DATA_DIR])
-    # generate_rainbow_dataset(num_images=50, start_idx=0, output_dir=TRAIN_DATA_DIR)
+    restart_dataset(["testImages"])
+    generate_rainbow_dataset(num_images=3, start_idx=0, output_dir="testImages")
     # generate_rainbow_dataset(num_images=50, start_idx=0, output_dir=TEST_DATA_DIR)
     # to_delete = [2, 5, 15]
     # delete_tasks(to_delete, TEST_DATA_DIR)
