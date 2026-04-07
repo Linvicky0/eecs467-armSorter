@@ -3,3 +3,4 @@ config/*
 install_scripts/config/*
 *.DS_Store
 *.tmp
+**/__pycache__/**
