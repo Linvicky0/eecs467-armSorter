@@ -316,7 +316,7 @@ class Camera():
         
         # Transform points from World -> Camera frame using Extrinsic Matrix
         # Note: Using extrinsic_matrix_inv mapping standard convention World to Camera
-        cam_pts = self.extrinsic_matrix_inv @ world_pts 
+        cam_pts = self.extrinsic_matrix @ world_pts 
         
         # Extract 3D points in the camera frame (Drop homogeneous 1 for perspective projection)
         cam_pts_3d = cam_pts[0:3, :]
@@ -324,15 +324,26 @@ class Camera():
         # Project into 2D pixel space using Intrinsic Matrix (Shape: 3 x N)
         pixels_homogenous = self.intrinsic_matrix @ cam_pts_3d
         
-        # Normalize by the Z coordinate
-        u = pixels_homogenous[0, :] / pixels_homogenous[2, :]
-        v = pixels_homogenous[1, :] / pixels_homogenous[2, :]
+        # 1. Extract the Z values (depth)
+        z_values = pixels_homogenous[2, :]
         
-        # Draw the points on the image
+        # 2. Prevent divide-by-zero by ensuring Z is never exactly 0
+        # (This replaces any 0 or negative Z with a tiny positive number)
+        safe_z = np.maximum(z_values, 1e-5)
+        
+        # 3. Perform the true divide
+        u = pixels_homogenous[0, :] / safe_z
+        v = pixels_homogenous[1, :] / safe_z
+
         for i in range(len(u)):
+            # 4. Skip drawing any points that are behind or inside the camera
+            if z_values[i] <= 0.0:
+                continue
+                
             px, py = int(u[i]), int(v[i])
-            # Check bounds to ensure we are drawing onto the frame safely
-            if 0 <= px < 1280 and 0 <= py < 720:
+            
+            # Make sure you use the updated bounds from earlier!
+            if 0 <= px < 640 and 0 <= py < 480:
                 cv2.circle(modified_image, (px, py), 4, (0, 255, 0), -1)
 
         self.GridFrame = modified_image
