@@ -3,7 +3,6 @@ train: images/train
 val: images/val
 
 # Number of classes (24 total)
-nc: 24
 
 # Class names (index = class_id - 1 for 0-based YOLO format)
 names:
