@@ -1,0 +1,17 @@
+{
+  "name": "Ultralytics YOLO Dev Container",
+  "image": "ultralytics/ultralytics:8.4.36-arm64",
+  "workspaceFolder": "/yolo_seg",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/yolo_seg,type=bind,consistency=cached",
+  "settings": {
+    "terminal.integrated.shell.linux": "/bin/bash",
+    "python.pythonPath": "/usr/local/bin/python"
+  },
+  "extensions": [
+    "ms-python.python",
+    "ms-toolsai.jupyter",
+    "eamodio.gitlens"
+  ],
+  "postCreateCommand": "apt-get update && apt-get install -y bash-completion zsh curl && rm -rf /var/lib/apt/lists/* && pip install --upgrade pip || true",
+  "remoteUser": "root"
+}
