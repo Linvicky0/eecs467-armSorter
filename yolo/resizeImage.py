@@ -16,8 +16,7 @@ input_dir = args.input_dir
 output_dir = "resized_images"
 
 os.makedirs(output_dir, exist_ok=True)
-os.makedirs(f"{output_dir}/train", exist_ok=True)
-os.makedirs(f"{output_dir}/val", exist_ok=True)
+
 
 def letterbox(image, new_size=640):
     h, w = image.shape[:2]
@@ -37,12 +36,11 @@ def letterbox(image, new_size=640):
     canvas[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
     return canvas
 
-files = glob.glob(f"{input_dir}/**/*.png", recursive=True)
+files = glob.glob(f"{input_dir}/*.png", recursive=True)
 for path in files:
     img = cv2.imread(path)
     resized = letterbox(img, args.size)
-    subdir = path.split('/')[-2]
     filename = path.split('/')[-1]
-    cv2.imwrite(os.path.join(f"{output_dir}/{subdir}", filename), resized)
+    cv2.imwrite(os.path.join(f"{output_dir}", filename), resized)
 
 

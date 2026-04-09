@@ -79,7 +79,7 @@ def convertIds():
         with open(path, 'w') as f:
             f.write(newContent)
 
-# rename files
+# rename files in the same dir
 def renameFiles():
     pngs  = glob.glob(f"{args.annotated_dir}/**/*.png")
     txts = glob.glob(f"{args.annotated_dir}/**/*.txt")
