@@ -35,7 +35,7 @@ class Gui(QMainWindow):
         QWidget.__init__(self, parent)
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
-        self.count = 0
+        self.count = 52
         """ Groups of ui commonents """
         self.joint_readouts = [
             self.ui.rdoutBaseJC,

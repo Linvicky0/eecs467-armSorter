@@ -141,10 +141,6 @@ class StateMachine():
                 self.next_state = "estop"
                 return
             self.rxarm.set_positions(item)
-            # self.rxarm.arm.set_joint_positions(item,
-            #                      moving_time=2,
-            #                      accel_time=0.5,
-            #                      blocking=False)
             time.sleep(2)
 
         self.next_state = "idle"
@@ -191,10 +187,8 @@ class StateMachine():
                 break
             if gripper_state != self.rxarm.gripper_state:
                 if gripper_state:
-                    #self.rxarm.open_gripper()
                     self.rxarm.gripper_release()
                 else:
-                    #  self.rxarm.close_gripper()
                     self.rxarm.gripper_grasp()
             time.sleep(0.2) 
         if self.rxarm.estop:
@@ -224,6 +218,7 @@ class StateMachine():
         if self.rxarm.estop:
             self.next_state = "estop"
         self.next_state = "idle"
+
 
     def place(self):
         self.status_message = "State: Place - Click to place"
@@ -262,7 +257,11 @@ class StateMachine():
         """!
         @brief      Detect the blocks
         """
-        time.sleep(1)
+        self.current_state = "detect"
+        self.status_message = "Detecting blocks"
+        self.camera.blockDetector()
+        self.next_state = "idle"
+        # time.sleep(1)
 
     def initialize_rxarm(self):
         """!
