@@ -4,6 +4,7 @@ import numpy as np
 import glob
 import argparse
 
+
 parser = argparse.ArgumentParser(description="Resize images")
 parser.add_argument("--size", type=int, default=640, help="Resize size")
 parser.add_argument("--input_dir", type=str, required=True, help="directory of raw images")
