@@ -18,6 +18,10 @@ from sensor_msgs.msg import Image, CameraInfo
 from apriltag_msgs.msg import *
 from cv_bridge import CvBridge, CvBridgeError
 
+import yaml
+DTYPE = np.float64
+
+
 
 class Camera():
     """!
@@ -53,6 +57,10 @@ class Camera():
         """ block info """
         self.block_contours = np.array([])
         self.block_detections = np.array([])
+
+        # load the calibration data
+        # calibration_file = "calibration_data/ost.yaml"
+        # self.loadCameraCalibration(calibration_file)
 
     def processVideoFrame(self):
         """!
@@ -192,80 +200,21 @@ class Camera():
                     TODO: Implement your block detector here. You will need to locate blocks in 3D space and put their XYZ
                     locations in self.block_detections
         """
-        self.block_detections.reset()
+        gray = cv2.cvtColor(self.VideoFrame, cv2.COLOR_RGB2GRAY)
         
-        # 1. Convert to grayscale and apply a slight blur to reduce noise
-        gray = cv2.cvtColor(self.ProcessVideoFrame, cv2.COLOR_RGB2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        # 2. Threshold the image to create a binary mask (black and white)
+        # Note: You may need to adjust '127' based on your actual lighting conditions
+        _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
         
-        # 2. Use Canny edge detection to find the edges of the blocks
-        edged = cv2.Canny(blurred, 50, 150)
+        # 3. Find the contours
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        # 3. Apply morphological closing to bridge gaps in the edge map
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-        closed = cv2.morphologyEx(edged, cv2.MORPH_CLOSE, kernel)
+        # 4. Store them in the class attribute
+        self.block_contours = contours
         
-        # 4. Mask out the robot arm and the area outside the board (matching your depth mask)
-        mask = np.zeros_like(closed, dtype=np.uint8)
-        cv2.rectangle(mask, (225, 90), (1083, 700), 255, cv2.FILLED)  # Active board area
-        cv2.rectangle(mask, (570, 400), (735, 700), 0, cv2.FILLED)    # Robot arm base
-        closed = cv2.bitwise_and(closed, mask)
-        
-        # 5. Find contours in the masked edge map
-        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2:]
-        self.block_detections.all_contours = contours
-        
-        for contour in contours:
-            M = cv2.moments(contour)
-            
-            # Reject false positive detections by area size
-            if M['m00'] < 200 or abs(M["m00"]) > 7000:
-                continue
-                
-            # Calculate pixel centroid
-            cx = int(M['m10'] / M['m00'])
-            cy = int(M['m01'] / M['m00'])
-            
-            # Ensure centroid is within image boundaries
-            if cx >= 1280 or cy >= 720 or cx < 0 or cy < 0:
-                continue
-                
-            # 6. Extract Z coordinate using the corresponding point in the depth map
-            cz = self.ProcessDepthFrameRaw[cy, cx]
-            if cz == 0:  # Skip if depth reading is invalid/zero
-                continue
-                
-            # Calculate Orientation
-            block_ori = -cv2.minAreaRect(contour)[2] 
-            
-            # Calculate World XYZ coordinates
-            block_xyz = self.coord_pixel_to_world(cx, cy, cz)
-            
-            # 7. Size classification and Z-offsetting (mirrored from your depth logic)
-            if M["m00"] < 850:
-                block_xyz[2] = block_xyz[2] - 12.5
-                self.block_detections.sizes.append(1)  # 1 for small
-            else:
-                block_xyz[2] = block_xyz[2] - 19
-                self.block_detections.sizes.append(0)  # 0 for large
-                
-            # 8. Get Block Color
-            block_color = self.retrieve_area_color(
-                self.ProcessVideoFrame, 
-                self.ProcessVideoFrameLab, 
-                self.ProcessVideoFrameHSV, 
-                contour
-            )
-            
-            # 9. Update the block_detections tracker
-            self.block_detections.uvds.append([cx, cy, cz])
-            self.block_detections.xyzs.append(block_xyz)
-            self.block_detections.contours.append(contour)
-            self.block_detections.thetas.append(np.deg2rad(block_ori))
-            self.block_detections.colors.append(block_color)
-            
-        # 10. Sort blocks natively by color as defined in your pipeline
-        self.block_detections.update("color")
+        # 5. Draw the contours onto the VideoFrame
+        # -1 draws all contours, (255, 0, 255) is magenta, 3 is thickness
+        cv2.drawContours(self.VideoFrame, self.block_contours, -1, (255, 0, 255), 3)
 
     def detectBlocksInDepthImage(self):
         """!
@@ -316,7 +265,7 @@ class Camera():
         
         # Transform points from World -> Camera frame using Extrinsic Matrix
         # Note: Using extrinsic_matrix_inv mapping standard convention World to Camera
-        cam_pts = self.extrinsic_matrix_inv @ world_pts 
+        cam_pts = self.extrinsic_matrix @ world_pts 
         
         # Extract 3D points in the camera frame (Drop homogeneous 1 for perspective projection)
         cam_pts_3d = cam_pts[0:3, :]
@@ -324,15 +273,26 @@ class Camera():
         # Project into 2D pixel space using Intrinsic Matrix (Shape: 3 x N)
         pixels_homogenous = self.intrinsic_matrix @ cam_pts_3d
         
-        # Normalize by the Z coordinate
-        u = pixels_homogenous[0, :] / pixels_homogenous[2, :]
-        v = pixels_homogenous[1, :] / pixels_homogenous[2, :]
+        # 1. Extract the Z values (depth)
+        z_values = pixels_homogenous[2, :]
         
-        # Draw the points on the image
+        # 2. Prevent divide-by-zero by ensuring Z is never exactly 0
+        # (This replaces any 0 or negative Z with a tiny positive number)
+        safe_z = np.maximum(z_values, 1e-5)
+        
+        # 3. Perform the true divide
+        u = pixels_homogenous[0, :] / safe_z
+        v = pixels_homogenous[1, :] / safe_z
+
         for i in range(len(u)):
+            # 4. Skip drawing any points that are behind or inside the camera
+            if z_values[i] <= 0.0:
+                continue
+                
             px, py = int(u[i]), int(v[i])
-            # Check bounds to ensure we are drawing onto the frame safely
-            if 0 <= px < 1280 and 0 <= py < 720:
+            
+            # Make sure you use the updated bounds from earlier!
+            if 0 <= px < 640 and 0 <= py < 480:
                 cv2.circle(modified_image, (px, py), 4, (0, 255, 0), -1)
 
         self.GridFrame = modified_image

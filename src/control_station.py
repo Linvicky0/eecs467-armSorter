@@ -35,6 +35,7 @@ class Gui(QMainWindow):
         QWidget.__init__(self, parent)
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
+        self.count = 52
         """ Groups of ui commonents """
         self.joint_readouts = [
             self.ui.rdoutBaseJC,
@@ -111,6 +112,9 @@ class Gui(QMainWindow):
         self.ui.btnUser9.clicked.connect(partial(nxt_if_arm_init, 'task_test'))
 
 
+        self.ui.btnUser4.setText('Show Camera')
+        self.ui.btnUser4.clicked.connect(lambda: self.showCam())
+
         # Sliders
         for sldr in self.joint_sliders:
             sldr.valueChanged.connect(self.sliderChange)
@@ -169,12 +173,26 @@ class Gui(QMainWindow):
         """
         if (self.ui.radioVideo.isChecked()):
             self.ui.videoDisplay.setPixmap(QPixmap.fromImage(rgb_image))
+      
+        #cv2.waitKey(1)
         if (self.ui.radioDepth.isChecked()):
             self.ui.videoDisplay.setPixmap(QPixmap.fromImage(depth_image))
         if (self.ui.radioUsr1.isChecked()):
             self.ui.videoDisplay.setPixmap(QPixmap.fromImage(tag_image))
         if (self.ui.radioUsr2.isChecked()):
             self.ui.videoDisplay.setPixmap(QPixmap.fromImage(grid_image))
+
+    def showCam(self):
+        
+        # self.ui.videoDisplay.setPixmap(QPixmap.fromImage(rgb_image))
+        filename = f"data/frame_{self.count}.png"
+        # cv2.imwrite(filename, self.camera.VideoFrame)
+        if self.camera.VideoFrame is not None:
+            debug_frame = cv2.cvtColor(self.camera.VideoFrame, cv2.COLOR_RGB2BGR)
+            cv2.imshow("User Popup View", debug_frame)
+            cv2.imwrite(filename, debug_frame)
+            self.count += 1
+            cv2.waitKey(1)
 
     """ Other callback functions attached to GUI elements"""
 

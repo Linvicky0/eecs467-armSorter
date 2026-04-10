@@ -141,10 +141,6 @@ class StateMachine():
                 self.next_state = "estop"
                 return
             self.rxarm.set_positions(item)
-            # self.rxarm.arm.set_joint_positions(item,
-            #                      moving_time=2,
-            #                      accel_time=0.5,
-            #                      blocking=False)
             time.sleep(2)
 
         self.next_state = "idle"
@@ -191,16 +187,26 @@ class StateMachine():
                 break
             if gripper_state != self.rxarm.gripper_state:
                 if gripper_state:
-                    #self.rxarm.open_gripper()
                     self.rxarm.gripper_release()
                 else:
-                    #  self.rxarm.close_gripper()
                     self.rxarm.gripper_grasp()
             time.sleep(0.2) 
         if self.rxarm.estop:
             self.next_state = "estop"
         self.next_state = "idle"
-            
+
+    def calMoveTime(self, target_joint):
+        displacement = target_joint - self.rxarm.get_positions()
+        angular_v = np.ones(displacement.shape) * (np.pi / 4)
+        angular_v[0] = np.pi / 2.5
+        angular_v[3] = np.pi / 2.5
+        angular_v[4] = np.pi / 2.5
+        angular_t = np.abs(displacement) / angular_v
+        move_time = np.max(angular_t)
+        if move_time < 0.4:
+            move_time = 0.4
+        ac_time = move_time / 3
+        return move_time, ac_time
 
     def pick(self):
         self.status_message = "State: Pick - Click to pick"
@@ -245,7 +251,20 @@ class StateMachine():
             self.next_state = "estop"
         self.next_state = "idle"
 
-
+    def get_block_xyz_from_click(self, click_uvd):
+        """!
+        @brief      Converts the clicked uvd (pixel + depth) to world coordinates.
+        """
+        u, v, z = click_uvd[0], click_uvd[1], click_uvd[2]
+        
+        # Use the function we just added to your Camera class!
+        world_pos = self.camera.coord_pixel_to_world(u, v, z)
+        
+        # To get the true orientation, you'd cross-reference this click with 
+        # self.camera.block_detections. For now, we will default to 0.0 rad.
+        block_ori = 0.0 
+        
+        return world_pos, block_ori
     
     def calibrate(self):
         """!
@@ -257,12 +276,17 @@ class StateMachine():
         """TODO Perform camera calibration routine here"""
         self.status_message = "Calibration - Completed Calibration"
 
+
     """ TODO """
     def detect(self):
         """!
         @brief      Detect the blocks
         """
-        time.sleep(1)
+        self.current_state = "detect"
+        self.status_message = "Detecting blocks"
+        self.camera.blockDetector()
+        self.next_state = "idle"
+        # time.sleep(1)
 
     def initialize_rxarm(self):
         """!
