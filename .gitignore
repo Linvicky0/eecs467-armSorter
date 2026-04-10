@@ -1,3 +1,6 @@
 .vscode/
 **/data/**
 labelStudio.py
+*.zip
+.DS_Store
+**/.DS_Store
