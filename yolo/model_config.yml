@@ -1,0 +1,32 @@
+path: /yolo_seg/yolo/data
+train: images/train
+val: images/val
+
+# Number of classes (24 total)
+
+# Class names (index = class_id - 1 for 0-based YOLO format)
+names:
+  0: small_red_sphere
+  1: small_red_cube
+  2: small_orange_sphere
+  3: small_orange_cube
+  4: small_yellow_sphere
+  5: small_yellow_cube
+  6: small_green_sphere
+  7: small_green_cube
+  8: small_blue_sphere
+  9: small_blue_cube
+  10: small_purple_sphere
+  11: small_purple_cube
+  12: large_red_sphere
+  13: large_red_cube
+  14: large_orange_sphere
+  15: large_orange_cube
+  16: large_yellow_sphere
+  17: large_yellow_cube
+  18: large_green_sphere
+  19: large_green_cube
+  20: large_blue_sphere
+  21: large_blue_cube
+  22: large_purple_sphere
+  23: large_purple_cube
