@@ -340,7 +340,7 @@ class Camera():
 
                 # img_points = detected pixel coordiantes of the tag 
                 for corner in detection.corners:
-                    img_points_list.append([corner.x, corner.y , 0])
+                    img_points_list.append([corner.x, corner.y])
         
         if (len(obj_points_list) <4):
             return None
@@ -396,6 +396,12 @@ class Camera():
                     pts = np.array([[int(pt.x), int(pt.y)] for pt in detection.corners], np.int32)
                     pts = pts.reshape((-1, 1, 2))
                     cv2.polylines(modified_image, [pts], isClosed=True, color=(255, 0, 0), thickness=2)
+
+                # determine the order of corners, need to match image_points and obj_points order in solve_extrinsic
+                for i, corner in enumerate(detection.corners):
+                    cv2.circle(self.VideoFrame, (int(corner.x), int(corner.y)), 5, (255, 0, 0), -1)
+                    cv2.putText(self.VideoFrame, str(i), (int(corner.x), int(corner.y) - 10), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
 
         self.TagImageFrame = modified_image
