@@ -17,6 +17,7 @@ from std_msgs.msg import String
 from sensor_msgs.msg import Image, CameraInfo
 from apriltag_msgs.msg import *
 from cv_bridge import CvBridge, CvBridgeError
+import os
 
 import yaml
 DTYPE = np.float64
@@ -68,8 +69,12 @@ class Camera():
         }   
 
         # load the calibration data
-        calibration_file = "calibration_data/ost.yaml"
-        self.loadCameraCalibration(calibration_file)
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        calib_path = os.path.join(base_path, "calibration_data")
+        calib_data = os.path.join(calib_path, "ost.yaml")
+
+      #  calibration_file = "calibration_data/ost.yaml"
+        self.loadCameraCalibration(calib_data)
 
     def processVideoFrame(self):
         """!
