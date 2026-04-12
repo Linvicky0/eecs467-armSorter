@@ -62,10 +62,10 @@ class Camera():
 
         # April tag IDS and positions for building the board
         self.boardTag_center =  {  
-            4:          # top-left
-            3:          # top-right
-            1:          # bottom-left
-            2:          # bottom-right
+            4: [250, 200, 0],          # top-left
+            3: [750, 200, 0],        # top-right
+            1: [250, 500, 0],         # bottom-left
+            2: [750, 500, 0]         # bottom-right
         }   
 
         # load the calibration data
