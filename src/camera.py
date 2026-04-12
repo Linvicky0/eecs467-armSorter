@@ -58,9 +58,19 @@ class Camera():
         self.block_contours = np.array([])
         self.block_detections = np.array([])
 
+
+        self.tags_center =  np.array([
+            [250, 150, 0.0],       # Tag 1 Center: Top-Left
+            [500, 150, 0.0],     # Tag 2 Center: Top-Right (Moved 300 on X)
+            [250, 450, 0.0],     # Tag 3 Center: Bottom-Left (Moved 500 on Y)
+            [500, 450, 0.0]    # Tag 4 Center: Bottom-Right (Moved 300 on X, 500 on Y)
+        ], dtype=np.float32)
+
+    
+
         # load the calibration data
-        # calibration_file = "calibration_data/ost.yaml"
-        # self.loadCameraCalibration(calibration_file)
+        calibration_file = "calibration_data/ost.yaml"
+        self.loadCameraCalibration(calibration_file)
 
     def processVideoFrame(self):
         """!
@@ -182,9 +192,36 @@ class Camera():
             self.intrinsic_matrix = np.asarray(data["camera_matrix"]["data"], dtype=DTYPE).reshape((3, 3))
             self.distortion_coefficients = np.asarray(data["distortion_coefficients"]["data"], dtype=DTYPE).reshape(-1)
         else:
-            self.intrinsic_matrix = np.array([925.27515, 0.0, 653.75928, 
-                                            0.0, 938.70001, 367.99236, 
+            self.intrinsic_matrix = np.array([605.357, 0.0, 327.139, 
+                                            0.0, 605.377, 239.76, 
                                             0.0, 0.0, 1.0], dtype=DTYPE).reshape((3, 3))
+            
+        # get the tags object points
+        half_tag = 25
+        obj_points = []
+        for center in self.tags_center:
+            x,y,z = center
+
+            obj_points.append([x - center, y-center, z])
+
+
+        image_points = []
+        if self.tag_detections is not None and hasattr(self.tag_detections, 'detections'):
+            for detection in self.tag_detections:
+                image_points.extend(detection.corners)
+        
+        # solvePnp
+        success, rvec, tvec = cv2.solvePnp(
+            obj_points,
+            image_points,
+            self.intrinsic_matrix,
+            self.dis
+
+        )
+
+
+                
+
         self.extrinsic_matrix_inv = np.array([1,0,0,-20,
                                             0, -1, 0, 211,
                                             0, 0, -1, 974,
