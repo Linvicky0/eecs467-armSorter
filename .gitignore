@@ -8,3 +8,7 @@ install_scripts/config/*
 labelStudio.py
 *.zip
 **/.DS_Store
+**/__pycache__/*
+src/calibration_data/
+src/calibration_data/*.png
+src/calibrationdata.tar.gz

@@ -62,10 +62,10 @@ class Camera():
 
         # April tag IDS and positions for building the board
         self.boardTag_center =  {  
-            4:          # top-left
-            3:          # top-right
-            1:          # bottom-left
-            2:          # bottom-right
+            4: [250, 200, 0],          # top-left
+            3: [750, 200, 0],        # top-right
+            1: [250, 500, 0],         # bottom-left
+            2: [750, 500, 0]         # bottom-right
         }   
 
         # load the calibration data
@@ -201,11 +201,11 @@ class Camera():
                                             0.0, 938.70001, 367.99236, 
                                             0.0, 0.0, 1.0], dtype=DTYPE).reshape((3, 3))
         # f22 extrinsic matrix perimeters 
-        # self.extrinsic_matrix_inv = np.array([1,0,0,-20,
-        #                                     0, -1, 0, 211,
-        #                                     0, 0, -1, 974,
-        #                                     0, 0, 0, 1], dtype=DTYPE).reshape((4, 4))
-        # self.extrinsic_matrix = np.linalg.pinv(self.extrinsic_matrix_inv)
+        self.extrinsic_matrix_inv = np.array([1,0,0,-20,
+                                            0, -1, 0, 211,
+                                            0, 0, -1, 974,
+                                            0, 0, 0, 1], dtype=DTYPE).reshape((4, 4))
+        self.extrinsic_matrix = np.linalg.pinv(self.extrinsic_matrix_inv)
 
         self.intrinsic_matrix_inv = np.linalg.pinv(self.intrinsic_matrix)
 
@@ -329,18 +329,20 @@ class Camera():
             if tag_id in self.boardTag_center:
                 x,y = self.boardTag_center[tag_id]
 
-                half = 25    # half tag size in mm
+               # half = 25    # half tag size in mm
                 # get the corner positions of the tag
-                obj_points_list.extend([
-                    [x-half, y-half, 0],
-                    [x+half, y-half, 0],
-                    [x-half, y+half, 0],
-                    [x+half, y+half, 0]
-                ])  # obj_points = measured world coordinates
+                # obj_points_list.extend([
+                #     [x-half, y-half, 0],
+                #     [x+half, y-half, 0],
+                #     [x-half, y+half, 0],
+                #     [x+half, y+half, 0]
+                # ])  # obj_points = measured world coordinates
+                obj_points_list.append([x,y, 0])
 
                 # img_points = detected pixel coordiantes of the tag 
-                for corner in detection.corners:
-                    img_points_list.append([corner.x, corner.y])
+                # for corner in detection.corners:
+                #     img_points_list.append([corner.x, corner.y])
+                img_points_list.append([detection.centre.x,detection.centre.y])
         
         if (len(obj_points_list) <4):
             return None
@@ -356,8 +358,11 @@ class Camera():
             # Convert rotation vector to 3x3 matrix
             R, _ = cv2.Rodrigues(rvec)
                 
-            # Create the 3x4 Extrinsic Matrix [R | t]
-            extrinsic_matrix = np.hstack((R, tvec))
+            # Create the 4x4 Extrinsic Matrix [R | t]
+            extrinsic_matrix = np.eye(4, dtype=DTYPE)
+            extrinsic_matrix[:3, :3] = R
+            extrinsic_matrix[:3, 3] = tvec.squeeze()
+            
             self.extrinsic_matrix = extrinsic_matrix
             self.camera_calibrated = True   # both intrinsic and extrinsic calibration completed
 
@@ -435,11 +440,11 @@ class TagDetectionListener(Node):
         self.camera = camera
 
     def callback(self, msg):
-        if msg is not None and hasattr(msg, 'detection'):
-            self.camera.tag_detections = msg
+        #if msg is not None and hasattr(msg, 'detection'):
+        self.camera.tag_detections = msg
 
-            if self.intrinsic_matrix is not None:   # intrinsic calibration data loaded
-                self.solve_extrinsic()  
+          #  if self.intrinsic_matrix is not None:   # intrinsic calibration data loaded
+               # self.solve_extrinsic()  
 
         if np.any(self.camera.VideoFrame != 0):
             self.camera.drawTagsInRGBImage(msg)
@@ -518,7 +523,7 @@ class VideoThread(QThread):
                 if ((rgb_frame != None) & (depth_frame != None)):
                     self.updateFrame.emit(
                         rgb_frame, depth_frame, tag_frame, grid_frame)
-                self.executor.spin_once() # comment this out when run this file alone.
+               # self.executor.spin_once() # comment this out when run this file alone.
                 elapsed_time = time.time() - start_time
                 sleep_time = max(0.03 - elapsed_time, 0)
                 time.sleep(sleep_time)
