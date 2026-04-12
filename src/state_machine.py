@@ -593,9 +593,9 @@ class StateMachine():
         return True
 
     def auto_place_notouch(self, _target_world_pos, block_ori=None, phi=np.pi/2, place_near=False, to_sky=False, push=[0,175,0]):
-        target_world_pos = deepcopy(_target_world_pos)
-        above_world_pos = deepcopy(_target_world_pos)
-        push_pos = deepcopy(push)
+        target_world_pos = copy.deepcopy(_target_world_pos)
+        above_world_pos = copy.deepcopy(_target_world_pos)
+        push_pos = copy.deepcopy(push)
         if place_near:
             target_world_pos = [0, 200, 0]
             above_world_pos = [0, 200, 0]
@@ -640,8 +640,8 @@ class StateMachine():
 
         # Try horizontal reach with phi = 0.0
         if not reachable_high or not reachable_low:
-            target_world_pos = deepcopy(_target_world_pos)
-            above_world_pos = deepcopy(_target_world_pos)
+            target_world_pos = copy.deepcopy(_target_world_pos)
+            above_world_pos = copy.deepcopy(_target_world_pos)
             if _target_world_pos[2] >= 38*4+10 and to_sky:
                 target_world_pos[1] = target_world_pos[1] - 13
                 above_world_pos[1] = above_world_pos[1] - 13
@@ -744,7 +744,7 @@ class StateMachine():
                                         accel_time=ac_time,
                                         blocking=True)
 
-        joint_angles_end = copy(joint_angles_1)
+        joint_angles_end = copy.copy(joint_angles_1)
         joint_angles_end[1] = -np.pi/6
         joint_angles_end[2] = 0
         joint_angles_end[3] = -np.pi/2
