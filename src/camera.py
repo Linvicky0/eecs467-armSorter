@@ -201,13 +201,14 @@ class Camera():
                                             0.0, 938.70001, 367.99236, 
                                             0.0, 0.0, 1.0], dtype=DTYPE).reshape((3, 3))
         # f22 extrinsic matrix perimeters 
-        self.extrinsic_matrix_inv = np.array([1,0,0,-20,
-                                            0, -1, 0, 211,
-                                            0, 0, -1, 974,
-                                            0, 0, 0, 1], dtype=DTYPE).reshape((4, 4))
-        self.extrinsic_matrix = np.linalg.pinv(self.extrinsic_matrix_inv)
+        # self.extrinsic_matrix_inv = np.array([1,0,0,-20,
+        #                                     0, -1, 0, 211,
+        #                                     0, 0, -1, 974,
+        #                                     0, 0, 0, 1], dtype=DTYPE).reshape((4, 4))
+        # self.extrinsic_matrix = np.linalg.pinv(self.extrinsic_matrix_inv)
 
         self.intrinsic_matrix_inv = np.linalg.pinv(self.intrinsic_matrix)
+        
 
 
     def blockDetector(self):
@@ -266,6 +267,9 @@ class Camera():
                     and draw on self.GridFrame the grid intersection points from self.grid_points
                     (hint: use the cv2.circle function to draw circles on the image)
         """
+        if (self.extrinsic_matrix is None):
+            return
+        
         modified_image = self.VideoFrame.copy()
         # Write your code here
         # Extract X and Y coordinates from the meshgrid
@@ -319,7 +323,7 @@ class Camera():
     def solve_extrinsic(self):
         """ Solve extrinsic matrix using detected board tags and their world coordinates
         Origin (0,0) is at top-left corner of the board"""
-        
+
         obj_points_list = []
         img_points_list = []
 
@@ -343,7 +347,11 @@ class Camera():
                 # for corner in detection.corners:
                 #     img_points_list.append([corner.x, corner.y])
                 img_points_list.append([detection.centre.x,detection.centre.y])
-        
+                debug_img = self.VideoFrame.copy()
+                window_name = f"Debug_Tag_{tag_id}"
+                cv2.imshow(window_name, cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR))
+                cv2.waitKey(1)
+                    
         if (len(obj_points_list) <4):
             return None
         # convert obj_points and img_points to np.array float64 for openCV
@@ -353,6 +361,8 @@ class Camera():
         # use openCV solvePnP to get rotation and translation vectors
         success, rvec, tvec = cv2.solvePnP(
             obj_points, img_points, self.intrinsic_matrix, self.dist_coeff, flags=cv2.SOLVEPNP_ITERATIVE)
+
+
 
         if success:
             # Convert rotation vector to 3x3 matrix
@@ -365,6 +375,20 @@ class Camera():
             
             self.extrinsic_matrix = extrinsic_matrix
             self.camera_calibrated = True   # both intrinsic and extrinsic calibration completed
+
+            try:
+                base_path = os.path.dirname(os.path.abspath(__file__))
+                file_path = os.path.join(base_path, "extrinsic_matrix.txt")
+                
+                with open(file_path, "w") as f:
+                    f.write("Extrinsic Matrix (World to Camera):\n")
+                    # Use numpy's array2string for clean formatting
+                    matrix_str = np.array2string(extrinsic_matrix, precision=4, suppress_small=True)
+                    f.write(matrix_str)
+                
+                self.get_logger().info("Successfully saved extrinsic matrix to extrinsic_matrix.txt")
+            except Exception as e:
+                self.get_logger().error(f"Failed to write to file: {str(e)}")
 
 
 
@@ -440,11 +464,11 @@ class TagDetectionListener(Node):
         self.camera = camera
 
     def callback(self, msg):
-        #if msg is not None and hasattr(msg, 'detection'):
-        self.camera.tag_detections = msg
+        if msg is not None and hasattr(msg, 'detection'):
+            self.camera.tag_detections = msg
 
-          #  if self.intrinsic_matrix is not None:   # intrinsic calibration data loaded
-               # self.solve_extrinsic()  
+        if self.camera.intrinsic_matrix is not None:   # intrinsic calibration data loaded
+            self.camera.solve_extrinsic()  
 
         if np.any(self.camera.VideoFrame != 0):
             self.camera.drawTagsInRGBImage(msg)
@@ -523,7 +547,7 @@ class VideoThread(QThread):
                 if ((rgb_frame != None) & (depth_frame != None)):
                     self.updateFrame.emit(
                         rgb_frame, depth_frame, tag_frame, grid_frame)
-               # self.executor.spin_once() # comment this out when run this file alone.
+                self.executor.spin_once() # comment this out when run this file alone.
                 elapsed_time = time.time() - start_time
                 sleep_time = max(0.03 - elapsed_time, 0)
                 time.sleep(sleep_time)
