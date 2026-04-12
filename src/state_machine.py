@@ -210,9 +210,7 @@ class StateMachine():
         return move_time, ac_time
 
     def pick(self):
-        self.status_message = "State: Pick - Click to pick"
-        self.current_state = "pick"
-        self.camera.new_click = False
+        sel.camera.new_click = False
         print("[CLICK PICK] Please click one point to pick...")
         while not self.camera.new_click:
             time.sleep(0.05)
@@ -226,7 +224,9 @@ class StateMachine():
         self.rxarm.go_to_home_pose(moving_time=2,
                                     accel_time=0.5,
                                     blocking=True)
-        
+        f.status_message = "State: Pick - Click to pick"
+        self.current_state = "pick"
+        self
         self.auto_pick(target_world_pos, block_ori)
         if self.rxarm.estop:
             self.next_state = "estop"
@@ -320,14 +320,12 @@ class StateMachine():
         self.rxarm.set_single_joint_position("waist", joint_angles_1[0], moving_time=move_time, accel_time=ac_time, blocking=True)
 
         if to_sky:
-            front_world_pos = deepcopy(above_world_pos)
+            front_world_pos = copy.deepcopy(above_world_pos)
             front_world_pos[0] = front_world_pos[0] + 20
             reachable_front, joint_angles_front = IK_geometric([front_world_pos[0], 
                                                         front_world_pos[1], 
                                                         front_world_pos[2], 
-                                                        0.0],
-                                                        m_matrix=self.rxarm.M_matrix,
-                                                        s_list=self.rxarm.S_list)
+                                                        0.0])
             move_time, ac_time = self.calMoveTime(joint_angles_front)
             self.rxarm.set_joint_positions(joint_angles_front,
                                             moving_time=move_time,
@@ -376,7 +374,7 @@ class StateMachine():
                                         blocking=True)
 
         # 5. raise to the theta1 = 0 and theta2 = 0
-        joint_angles_end = copy(joint_angles_1)
+        joint_angles_end = copy.copy(joint_angles_1)
         joint_angles_end[1] = -np.pi/4
         joint_angles_end[2] = 0
         joint_angles_end[3] = -np.pi/2
@@ -422,6 +420,345 @@ class StateMachine():
         if self.rxarm.estop:
             self.next_state = "estop"
         self.next_state = "idle"
+
+    def auto_place(self, _target_world_pos, block_ori=None, phi=np.pi/2, place_near=False, to_sky=False):
+        target_world_pos = copy.deepcopy(_target_world_pos)
+        above_world_pos = copy.deepcopy(_target_world_pos)
+        if place_near:
+            target_world_pos = [0, 200, 0]
+            above_world_pos = [0, 200, 0]
+
+        ############ Planning #############
+        # print("[PLACE]  Planning waypoints...")
+        place_height_offset = 33
+        place_wrist_offset = np.pi/18.0/3.0
+        target_world_pos[2] = target_world_pos[2] + place_height_offset
+        above_world_pos[2] = above_world_pos[2] + place_height_offset + 80
+
+        reachable_low, reachable_high = False, False
+
+        # Try vertical reach with phi = pi/2
+        reachable_low, joint_angles_2 = IK_geometric([target_world_pos[0], 
+                                                    target_world_pos[1],
+                                                    target_world_pos[2],
+                                                    phi],
+                                                    block_ori=block_ori,
+                                                    m_matrix=self.rxarm.M_matrix,
+                                                    s_list=self.rxarm.S_list)
+
+        if reachable_low:
+            # phi = np.pi/2
+            while not reachable_high:
+                reachable_high, joint_angles_1 = IK_geometric([above_world_pos[0], 
+                                                            above_world_pos[1],
+                                                            above_world_pos[2],
+                                                            phi])
+                if reachable_high:
+                    break
+                if above_world_pos[2] - target_world_pos[2] > 40:
+                    above_world_pos[2] = above_world_pos[2] - 10
+                elif _target_world_pos[2] < 38*4+10:
+                    if 0.98* math.sqrt(above_world_pos[0] * above_world_pos[0] + above_world_pos[1] * above_world_pos[1]) > 158.875:
+                        above_world_pos[0] = above_world_pos[0] * 0.98
+                        above_world_pos[1] = above_world_pos[1] * 0.98
+                    phi = phi - np.pi/18.0
+                else:
+                    break
+
+                if phi <= 0:
+                    break
+
+        # Try horizontal reach with phi = 0.0
+        if not reachable_high or not reachable_low:
+            target_world_pos = copy.deepcopy(_target_world_pos)
+            above_world_pos = copy.deepcopy(_target_world_pos)
+            if _target_world_pos[2] >= 38*4+10 and to_sky:
+                target_world_pos[1] = target_world_pos[1] - 13
+                above_world_pos[1] = above_world_pos[1] - 13
+            target_world_pos[2] = target_world_pos[2] + 12
+            above_world_pos[2] = above_world_pos[2] + 12 + 80
+            reachable_low, joint_angles_2 = IK_geometric([target_world_pos[0], 
+                                                        target_world_pos[1],
+                                                        target_world_pos[2],
+                                                        0.0])
+
+            while not reachable_high:
+                reachable_high, joint_angles_1 = IK_geometric([above_world_pos[0], 
+                                                            above_world_pos[1],
+                                                            above_world_pos[2],
+                                                            0.0])
+                # if 0.95* math.sqrt(above_world_pos[0] * above_world_pos[0] + above_world_pos[1] * above_world_pos[1]) > 158.875:
+                #         above_world_pos[0] = above_world_pos[0] * 0.95
+                #         above_world_pos[1] = above_world_pos[1] * 0.95
+                if reachable_high:
+                    break
+                if above_world_pos[2] - target_world_pos[2] > 40:
+                    above_world_pos[2] = above_world_pos[2] - 10
+                else:
+                    break
+
+        # Unreachable
+        if not reachable_high or not reachable_low:
+            if not self.next_state == "estop":
+                self.next_state = "idle"
+            print("[PLACE]  Target point is unreachable, remain idle!!!")
+            return False
+
+        ############ Executing #############
+        # print("[PLACE]  Executing waypoints...")
+        # !!! TODO
+        # joint_angles_start = self.rxarm.get_positions()
+        joint_angles_start = [0, 0, 0, 0, 0]
+        if _target_world_pos[2] > 38*4+10:
+            joint_angles_start = self.rxarm.safe_pose
+
+        joint_angles_start[0] = joint_angles_1[0]
+        # move_time = np.abs(joint_angles_1[0] - joint_angles_start[0]) / (np.pi/3)
+        # ac_time = move_time / 4
+        if not to_sky:
+            move_time, ac_time = self.calMoveTime(joint_angles_start)
+            print("move time: ", move_time)
+            self.rxarm.set_single_joint_position("waist", joint_angles_1[0], moving_time=move_time, accel_time=ac_time, blocking=True)
+        else:
+            move_time, ac_time = self.calMoveTime(self.rxarm.safe_pose)
+            self.rxarm.set_joint_positions(self.rxarm.safe_pose,
+                                            moving_time=move_time,
+                                            accel_time=ac_time,
+                                            blocking=True)
+
+        # 1. go to point above target pose
+        joint_angles_1[-2] = joint_angles_1[-2] + place_wrist_offset
+        move_time, ac_time = self.calMoveTime(joint_angles_1)
+        self.rxarm.set_joint_positions(joint_angles_1,
+                                        moving_time=move_time,
+                                        accel_time=ac_time,
+                                        blocking=True)
+
+        # 2. go to target pose and open gripper
+        joint_angles_2[-2] = joint_angles_2[-2] + place_wrist_offset
+        displacement = np.array(joint_angles_2) - np.array(joint_angles_1)
+        displacement_unit =  displacement
+
+        current_effort = self.rxarm.get_efforts()
+        print("initial: ", current_effort)
+        temp_joint = np.array(joint_angles_1)
+        for i in range(10):
+            # current_effort = self.rxarm.get_efforts()
+            # print("initial: ", current_effort)
+            displacement_unit = displacement_unit / 2
+            temp_joint = temp_joint + displacement_unit
+            move_time, ac_time = self.calMoveTime(temp_joint)
+            self.rxarm.set_joint_positions(temp_joint.tolist(),
+                                            moving_time=move_time,
+                                            accel_time=ac_time,
+                                            blocking=True)
+            rospy.sleep(0.1)
+            if i > 0:
+                effort = self.rxarm.get_efforts()
+                print(effort)
+                # effort_diff = (effort[1] - current_effort[1])
+                # if effort[1] > -150:
+                #     break
+                effort_diff = (effort - current_effort)[1:3]
+                print("effort norm:", np.linalg.norm(effort_diff))
+                if np.linalg.norm(effort_diff) > 100:
+                    break
+                if place_near:
+                    break
+
+        self.rxarm.open_gripper()
+        self.rxarm.gripper_state = False
+        
+        move_time, ac_time = self.calMoveTime(joint_angles_1)
+        self.rxarm.set_joint_positions(joint_angles_1,
+                                        moving_time=move_time,
+                                        accel_time=ac_time,
+                                        blocking=True)
+
+        joint_angles_end = copy.copy(joint_angles_1)
+        joint_angles_end[1] = -np.pi/6
+        joint_angles_end[2] = 0
+        joint_angles_end[3] = -np.pi/2
+        joint_angles_end[4] = 0
+        if _target_world_pos[2] >= 38*4+10:
+            joint_angles_end[1] = -np.pi/3
+
+        move_time, ac_time = self.calMoveTime(joint_angles_end)
+        self.rxarm.set_joint_positions(joint_angles_end,
+                                        moving_time=move_time,
+                                        accel_time=ac_time,
+                                        blocking=True)
+
+        # print("[PLACE]  Place finished!")
+        return True
+
+    def auto_place_notouch(self, _target_world_pos, block_ori=None, phi=np.pi/2, place_near=False, to_sky=False, push=[0,175,0]):
+        target_world_pos = copy.deepcopy(_target_world_pos)
+        above_world_pos = copy.deepcopy(_target_world_pos)
+        push_pos = copy.deepcopy(push)
+        if place_near:
+            target_world_pos = [0, 200, 0]
+            above_world_pos = [0, 200, 0]
+
+        ############ Planning #############
+        # print("[PLACE]  Planning waypoints...")
+        place_height_offset = 33
+        place_wrist_offset = np.pi/18.0/3.0
+        target_world_pos[2] = target_world_pos[2] + place_height_offset
+        above_world_pos[2] = above_world_pos[2] + place_height_offset + 80
+        push_pos[2] = push_pos[2] + place_height_offset
+
+        reachable_low, reachable_high = False, False
+
+        # Try vertical reach with phi = pi/2
+        reachable_low, joint_angles_2 = IK_geometric([target_world_pos[0], 
+                                                    target_world_pos[1],
+                                                    target_world_pos[2],
+                                                    phi])
+
+        if reachable_low:
+            # phi = np.pi/2
+            while not reachable_high:
+                reachable_high, joint_angles_1 = IK_geometric([above_world_pos[0], 
+                                                            above_world_pos[1],
+                                                            above_world_pos[2],
+                                                            phi])
+                if reachable_high:
+                    break
+                if above_world_pos[2] - target_world_pos[2] > 40:
+                    above_world_pos[2] = above_world_pos[2] - 10
+                elif _target_world_pos[2] < 38*4+10:
+                    if 0.98* math.sqrt(above_world_pos[0] * above_world_pos[0] + above_world_pos[1] * above_world_pos[1]) > 158.875:
+                        above_world_pos[0] = above_world_pos[0] * 0.98
+                        above_world_pos[1] = above_world_pos[1] * 0.98
+                    phi = phi - np.pi/18.0
+                else:
+                    break
+
+                if phi <= 0:
+                    break
+
+        # Try horizontal reach with phi = 0.0
+        if not reachable_high or not reachable_low:
+            target_world_pos = copy.deepcopy(_target_world_pos)
+            above_world_pos = copy.deepcopy(_target_world_pos)
+            if _target_world_pos[2] >= 38*4+10 and to_sky:
+                target_world_pos[1] = target_world_pos[1] - 13
+                above_world_pos[1] = above_world_pos[1] - 13
+            target_world_pos[2] = target_world_pos[2] + 12
+            above_world_pos[2] = above_world_pos[2] + 12 + 80
+            reachable_low, joint_angles_2 = IK_geometric([target_world_pos[0], 
+                                                        target_world_pos[1],
+                                                        target_world_pos[2],
+                                                        0.0])
+
+            while not reachable_high:
+                reachable_high, joint_angles_1 = IK_geometric([above_world_pos[0], 
+                                                            above_world_pos[1],
+                                                            above_world_pos[2],
+                                                            0.0])
+                # if 0.95* math.sqrt(above_world_pos[0] * above_world_pos[0] + above_world_pos[1] * above_world_pos[1]) > 158.875:
+                #         above_world_pos[0] = above_world_pos[0] * 0.95
+                #         above_world_pos[1] = above_world_pos[1] * 0.95
+                if reachable_high:
+                    break
+                if above_world_pos[2] - target_world_pos[2] > 40:
+                    above_world_pos[2] = above_world_pos[2] - 10
+                else:
+                    break
+
+        # Unreachable
+        if not reachable_high or not reachable_low:
+            if not self.next_state == "estop":
+                self.next_state = "idle"
+            print("[PLACE]  Target point is unreachable, remain idle!!!")
+            return False
+
+        ############ Executing #############
+        # print("[PLACE]  Executing waypoints...")
+        # !!! TODO
+        # joint_angles_start = self.rxarm.get_positions()
+        joint_angles_start = [0, 0, 0, 0, 0]
+        if _target_world_pos[2] > 38*4+10:
+            joint_angles_start = self.rxarm.safe_pose
+
+        joint_angles_start[0] = joint_angles_1[0]
+        # move_time = np.abs(joint_angles_1[0] - joint_angles_start[0]) / (np.pi/3)
+        # ac_time = move_time / 4
+        if not to_sky:
+            move_time, ac_time = self.calMoveTime(joint_angles_start)
+            print("move time: ", move_time)
+            self.rxarm.set_single_joint_position("waist", joint_angles_1[0], moving_time=move_time, accel_time=ac_time, blocking=True)
+        else:
+            move_time, ac_time = self.calMoveTime(self.rxarm.safe_pose)
+            self.rxarm.set_joint_positions(self.rxarm.safe_pose,
+                                            moving_time=move_time,
+                                            accel_time=ac_time,
+                                            blocking=True)
+
+        # 1. go to point above target pose
+        joint_angles_1[-2] = joint_angles_1[-2] + place_wrist_offset
+        move_time, ac_time = self.calMoveTime(joint_angles_1)
+        self.rxarm.set_joint_positions(joint_angles_1,
+                                        moving_time=move_time,
+                                        accel_time=ac_time,
+                                        blocking=True)
+
+        # 2. go to target pose 
+        joint_angles_2[-2] = joint_angles_2[-2] + place_wrist_offset
+        displacement = np.array(joint_angles_2) - np.array(joint_angles_1)
+        displacement_unit =  displacement
+
+        current_effort = self.rxarm.get_efforts()
+        print("initial: ", current_effort)
+        temp_joint = np.array(joint_angles_1)
+        for i in range(10):
+            # current_effort = self.rxarm.get_efforts()
+            # print("initial: ", current_effort)
+            displacement_unit = displacement_unit / 2
+            temp_joint = temp_joint + displacement_unit
+            move_time, ac_time = self.calMoveTime(temp_joint)
+            self.rxarm.set_joint_positions(temp_joint.tolist(),
+                                            moving_time=move_time,
+                                            accel_time=ac_time,
+                                            blocking=True)
+            rospy.sleep(0.1)
+            if i > 0:
+                break
+        
+        reachable_push, joint_angles_3 = IK_geometric([push_pos[0], 
+                                                        push_pos[1],
+                                                        push_pos[2],
+                                                        phi])
+        self.rxarm.set_joint_positions(joint_angles_3,
+                                        moving_time=2.0,
+                                        accel_time=1.0,
+                                        blocking=True)
+
+        self.rxarm.open_gripper()
+        self.rxarm.gripper_state = False
+        
+        move_time, ac_time = self.calMoveTime(joint_angles_1)
+        self.rxarm.set_joint_positions(joint_angles_1,
+                                        moving_time=move_time,
+                                        accel_time=ac_time,
+                                        blocking=True)
+
+        joint_angles_end = copy.copy(joint_angles_1)
+        joint_angles_end[1] = -np.pi/6
+        joint_angles_end[2] = 0
+        joint_angles_end[3] = -np.pi/2
+        joint_angles_end[4] = 0
+        if _target_world_pos[2] >= 38*4+10:
+            joint_angles_end[1] = -np.pi/3
+
+        move_time, ac_time = self.calMoveTime(joint_angles_end)
+        self.rxarm.set_joint_positions(joint_angles_end,
+                                        moving_time=move_time,
+                                        accel_time=ac_time,
+                                        blocking=True)
+        # print("[PLACE]  Place finished!")
+        return True
 
     def get_block_xyz_from_click(self, click_uvd):
         """!

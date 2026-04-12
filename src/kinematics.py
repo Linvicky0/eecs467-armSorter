@@ -156,7 +156,7 @@ def to_s_matrix(w, v):
     pass
 
 
-def IK_geometric(pose, dh_params = None):
+def IK_geometric(pose, dh_params = None, block_ori = None):
     """!
     @brief      Get all possible joint configs that produce the pose.
 
@@ -169,10 +169,10 @@ def IK_geometric(pose, dh_params = None):
                 configuration
     """
 
-    d1 = 104.57                 # from t1 to t2, aka base offset
-    l1 = np.sqrt(200*200+50*50) # from t2 to t3, shoulder to elbow shortest distance
-    l2 = 200                    # from t3 to t4, elbow to wrist
-    l3 = 408.575 - 200 - 50     # from t4 to ee, center of gripper (?)
+    l1 = 104.57                 # from t1 to t2, aka base offset
+    l2 = np.sqrt(200*200+50*50) # from t2 to t3, shoulder to elbow shortest distance
+    l3 = 200                    # from t3 to t4, elbow to wrist
+    l4 = 408.575 - 200 - 50     # from t4 to ee, center of gripper (?)
     t_offset = np.arctan2(50, 200) # offset angle bewteen t3 and t2
 
 
@@ -185,27 +185,47 @@ def IK_geometric(pose, dh_params = None):
                  [sin(final_theta), cos(final_theta), 0],
                  0, 0, 1)
     
-    zc = zc - l3
+    zc = zc - l4
 
     # find base orientation
     theta1 = np.arctan2(yc, xc)
 
     # find wrist position
-    l1 = dh_params[1]
+    phi = pose[3]
 
     # find the wrist orientation
     r_squared = xc**2 + yc**2
-    s_squared = (zc - d1)**2    # d1 is the height of base from shoulder
+    s_squared = (zc - l1)**2    # d1 is the height of base from shoulder
 
     # elbow down solution
-    theta3 = -np.arccos((r_squared + s_squared - l1*l1 - l2*l2)/(2*l1*l2))
-    theta2 = np.arctan2(np.sqrt(s_squared), np.sqrt(r_squared)) - np.arctan2(l2*np.sin(theta3), l1 + l2*np.cos(theta3)) 
+    theta3 = -np.arccos((r_squared + s_squared - l2*l2 - l3*l3)/(2*l2*l3))
+    theta2 = np.arctan2(np.sqrt(s_squared), np.sqrt(r_squared)) - np.arctan2(l2*np.sin(theta3), l2 + l3*np.cos(theta3)) 
 
     theta3 += np.pi/2 -t_offset
     theta3 = -theta3
     theta2 = np.pi/2 - t_offset - theta2 # offset
 
     theta4 = final_theta- (theta2 + theta3)
+
+    # Set wrist rotation based on block orientation
+    if block_ori is None:
+        theta5 = 0
+    elif block_ori < 0:
+        theta5 = np.pi/2
+    else:
+        if phi > np.pi/4.0:
+            theta5 = theta1 - block_ori
+            while theta5 > np.pi/4.0:
+                theta5 = theta5 - np.pi/2.0
+            while theta5 < - np.pi/4.0:
+                theta5 = theta5 + np.pi/2.0
+            # Additional rotation to enforce longitudinal pick
+            if theta5 > 0:
+                theta5 = theta5 - np.pi/2.0
+            else:
+                theta5 = theta5 + np.pi/2.0
+        else:
+            theta5 = 0
 
     if theta1 >= np.pi or theta1 <= -np.pi:
         return False, [0, 0, 0, 0, 0]
@@ -219,5 +239,5 @@ def IK_geometric(pose, dh_params = None):
     if theta4 >= np.deg2rad(123) or theta4 <= -np.deg2rad(100):
         return False, [0, 0, 0, 0, 0]
 
-    return [theta1,theta2,theta3,theta4] # ignore theta5 (end effector's orientation) 
+    return True, [theta1,theta2,-theta3,-theta4,theta5]
 
