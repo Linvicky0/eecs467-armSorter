@@ -156,7 +156,7 @@ def to_s_matrix(w, v):
     pass
 
 
-def IK_geometric(dh_params, pose):
+def IK_geometric(pose, dh_params = None):
     """!
     @brief      Get all possible joint configs that produce the pose.
 

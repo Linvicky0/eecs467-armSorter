@@ -5,6 +5,7 @@ from PyQt5.QtCore import QThread, Qt, pyqtSignal, pyqtSlot, QTimer
 import time
 import numpy as np
 import rclpy
+from kinematics import IK_geometric
 
 class StateMachine():
     """!
@@ -230,6 +231,177 @@ class StateMachine():
         if self.rxarm.estop:
             self.next_state = "estop"
         self.next_state = "idle"
+
+    def auto_pick(self, _target_world_pos, block_ori, phi=np.pi/2, double_check=False, to_sky=False):
+        # if to_sky:
+        #     _target_world_pos = [-345, 0, 0]
+        target_world_pos = copy.deepcopy(_target_world_pos)
+        above_world_pos = copy.deepcopy(_target_world_pos)
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!! pick pos:", target_world_pos)
+        xy_norm = np.linalg.norm(target_world_pos[:2])
+        print(xy_norm)
+        if xy_norm >= 315 and xy_norm<=430:
+            target_world_pos[2] = target_world_pos[2] + 1/55 * xy_norm
+            print(1/50 * xy_norm)
+        ############ Planning #############
+        # print("[PICK] Planning waypoints...")
+        pick_stable = True
+        pick_height_offset = 10 + 19 # + 5
+        pick_wrist_offset = 0 # np.pi/18.0/3.0
+        target_world_pos[2] = target_world_pos[2] + pick_height_offset
+        above_world_pos[2] = above_world_pos[2] + pick_height_offset + 80
+
+        reachable_low, reachable_high = False, False
+
+        # Try vertical reach with phi = pi/2
+        reachable_low, joint_angles_2 = IK_geometric([target_world_pos[0], 
+                                                    target_world_pos[1],
+                                                    target_world_pos[2],
+                                                    phi])
+        # phi = np.pi/2
+        if reachable_low:
+            while not reachable_high:
+                reachable_high, joint_angles_1 = IK_geometric([above_world_pos[0], 
+                                                            above_world_pos[1],
+                                                            above_world_pos[2],
+                                                            phi])
+                if reachable_high:
+                    break
+                if above_world_pos[2] - target_world_pos[2] > 40:
+                    above_world_pos[2] = above_world_pos[2] - 10
+                else:
+                    if 0.98* math.sqrt(above_world_pos[0] * above_world_pos[0] + above_world_pos[1] * above_world_pos[1]) > 158.875:
+                        above_world_pos[0] = above_world_pos[0] * 0.98
+                        above_world_pos[1] = above_world_pos[1] * 0.98
+                    phi = phi - np.pi/18.0
+                if phi <= 0:
+                    break
+
+        # add horizontal reach by detecting distance between the projection of arm and the target point
+        if self.check_path_clean(target_world_pos):
+            # Try horizontal reach with phi = 0.0
+            target_world_pos = copy.deepcopy(_target_world_pos)
+            above_world_pos = copy.deepcopy(_target_world_pos)
+            target_world_pos[2] = target_world_pos[2] + 5 + 19
+            target_world_pos[0] = target_world_pos[0] * 0.97
+            target_world_pos[1] = target_world_pos[1] * 0.97
+
+            above_world_pos[2] = above_world_pos[2] + 5 + 80
+            above_world_pos[0] = above_world_pos[0] * 0.97
+            above_world_pos[1] = above_world_pos[1] * 0.97
+            if not reachable_high or not reachable_low:
+                pick_stable = False
+                double_check = False
+                reachable_low, joint_angles_2 = IK_geometric([target_world_pos[0], 
+                                                            target_world_pos[1], 
+                                                            target_world_pos[2], 
+                                                            0.0])
+
+                reachable_high, joint_angles_1 = IK_geometric([above_world_pos[0], 
+                                                            above_world_pos[1], 
+                                                            above_world_pos[2], 
+                                                            0.0])
+
+        if not reachable_high or not reachable_low:
+            if not self.next_state == "estop":
+                self.next_state = "idle"
+            print("[PICK] Target point is unreachable, remain idle!!!")
+            return False, pick_stable
+
+        print("pick high: ", above_world_pos, ' ', phi)
+        print("pick low: ", target_world_pos)
+        
+        ############ Executing #############
+        # print("[PICK] Executing waypoints...")
+        joint_angles_start = [0, 0, 0, 0, 0]
+        joint_angles_start[0] = joint_angles_1[0]
+
+        move_time, ac_time = self.calMoveTime(joint_angles_start)
+        self.rxarm.set_single_joint_position("waist", joint_angles_1[0], moving_time=move_time, accel_time=ac_time, blocking=True)
+
+        if to_sky:
+            front_world_pos = deepcopy(above_world_pos)
+            front_world_pos[0] = front_world_pos[0] + 20
+            reachable_front, joint_angles_front = IK_geometric([front_world_pos[0], 
+                                                        front_world_pos[1], 
+                                                        front_world_pos[2], 
+                                                        0.0],
+                                                        m_matrix=self.rxarm.M_matrix,
+                                                        s_list=self.rxarm.S_list)
+            move_time, ac_time = self.calMoveTime(joint_angles_front)
+            self.rxarm.set_joint_positions(joint_angles_front,
+                                            moving_time=move_time,
+                                            accel_time=ac_time,
+                                            blocking=True)
+        
+        joint_angles_1[-2] = joint_angles_1[-2] + pick_wrist_offset
+        move_time, ac_time = self.calMoveTime(joint_angles_1)
+        self.rxarm.set_joint_positions(joint_angles_1,
+                                        moving_time=move_time,
+                                        accel_time=ac_time,
+                                        blocking=True)
+
+        # 3. go to the target pose and close gripper
+        joint_angles_2[-2] = joint_angles_2[-2] + pick_wrist_offset
+        move_time, ac_time = self.calMoveTime(joint_angles_2)
+        self.rxarm.set_joint_positions(joint_angles_2,
+                                        moving_time=move_time,
+                                        accel_time=ac_time,
+                                        blocking=True)
+        self.rxarm.close_gripper()
+        self.rxarm.gripper_state = False
+
+        if to_sky:
+            return True, pick_stable
+
+        if double_check:
+            self.rxarm.open_gripper()
+            self.rxarm.gripper_state = True
+            self.rxarm.set_ee_cartesian_trajectory(z=0.04, moving_time=0.5, wp_moving_time=0.1)
+            self.rxarm.set_single_joint_position("wrist_rotate", joint_angles_2[-1] + np.pi/2, moving_time=0.3, accel_time=0.14)
+            joint_angles_2[-1] = joint_angles_2[-1] + np.pi/2
+            self.rxarm.set_joint_positions(joint_angles_2,
+                                            moving_time=move_time,
+                                            accel_time=ac_time,
+                                            blocking=True)
+            self.rxarm.close_gripper()
+            self.rxarm.gripper_state = False
+
+        
+        # 4. raise to the point above the target point
+        move_time, ac_time = self.calMoveTime(joint_angles_1)
+        self.rxarm.set_joint_positions(joint_angles_1,
+                                        moving_time=move_time,
+                                        accel_time=ac_time,
+                                        blocking=True)
+
+        # 5. raise to the theta1 = 0 and theta2 = 0
+        joint_angles_end = copy(joint_angles_1)
+        joint_angles_end[1] = -np.pi/4
+        joint_angles_end[2] = 0
+        joint_angles_end[3] = -np.pi/2
+        joint_angles_end[4] = 0
+        move_time, ac_time = self.calMoveTime(joint_angles_end)
+        self.rxarm.set_joint_positions(joint_angles_end,
+                                        moving_time=move_time,
+                                        accel_time=ac_time,
+                                        blocking=True)
+
+        # linear distance between the gripper fingers [m]
+        gripper_distance = self.rxarm.get_gripper_position()
+        print("!!!!!!!!!!!!!!!!!!!!!!!!! Gripper Dist: {:.8f}".format(gripper_distance))
+        # TODO return pick fail according to gripper distance
+        # if gripper_distance <= 0.0300000:
+        #     print("[PICK] Failed to grab the block!")
+        #     return False, pick_stable
+        # else:
+        # print("[PICK] Pick finished!")
+        if gripper_distance>0.04:
+            self.pick_size = 0 # large
+        else:
+            self.pick_size = 1 # small
+        
+        return True, pick_stable
 
     def place(self):
         self.status_message = "State: Place - Click to place"
