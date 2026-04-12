@@ -17,6 +17,7 @@ from std_msgs.msg import String
 from sensor_msgs.msg import Image, CameraInfo
 from apriltag_msgs.msg import *
 from cv_bridge import CvBridge, CvBridgeError
+import os
 
 import yaml
 DTYPE = np.float64
@@ -43,8 +44,9 @@ class Camera():
 
         # mouse clicks & calibration variables
         self.camera_calibrated = False
-        self.intrinsic_matrix = np.eye(3)
-        self.extrinsic_matrix = np.eye(4)
+        self.intrinsic_matrix = None
+        self.extrinsic_matrix = None
+        self.dist_coeff = None
         self.last_click = np.array([0, 0]) # This contains the last clicked position
         self.new_click = False # This is automatically set to True whenever a click is received. Set it to False yourself after processing a click
         self.rgb_click_points = np.zeros((5, 2), int)
@@ -58,9 +60,21 @@ class Camera():
         self.block_contours = np.array([])
         self.block_detections = np.array([])
 
+        # April tag IDS and positions for building the board
+        self.boardTag_center =  {  
+            4:          # top-left
+            3:          # top-right
+            1:          # bottom-left
+            2:          # bottom-right
+        }   
+
         # load the calibration data
-        # calibration_file = "calibration_data/ost.yaml"
-        # self.loadCameraCalibration(calibration_file)
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        calib_path = os.path.join(base_path, "calibration_data")
+        calib_data = os.path.join(calib_path, "ost.yaml")
+
+      #  calibration_file = "calibration_data/ost.yaml"
+        self.loadCameraCalibration(calib_data)
 
     def processVideoFrame(self):
         """!
@@ -180,18 +194,21 @@ class Camera():
                 data = yaml.safe_load(stream)
             assert (data is not None)
             self.intrinsic_matrix = np.asarray(data["camera_matrix"]["data"], dtype=DTYPE).reshape((3, 3))
-            self.distortion_coefficients = np.asarray(data["distortion_coefficients"]["data"], dtype=DTYPE).reshape(-1)
+            self.dist_coeff = np.asarray(data["distortion_coefficients"]["data"], dtype=DTYPE).reshape(-1)
+
         else:
             self.intrinsic_matrix = np.array([925.27515, 0.0, 653.75928, 
                                             0.0, 938.70001, 367.99236, 
                                             0.0, 0.0, 1.0], dtype=DTYPE).reshape((3, 3))
-        self.extrinsic_matrix_inv = np.array([1,0,0,-20,
-                                            0, -1, 0, 211,
-                                            0, 0, -1, 974,
-                                            0, 0, 0, 1], dtype=DTYPE).reshape((4, 4))
-        self.extrinsic_matrix = np.linalg.pinv(self.extrinsic_matrix_inv)
+        # f22 extrinsic matrix perimeters 
+        # self.extrinsic_matrix_inv = np.array([1,0,0,-20,
+        #                                     0, -1, 0, 211,
+        #                                     0, 0, -1, 974,
+        #                                     0, 0, 0, 1], dtype=DTYPE).reshape((4, 4))
+        # self.extrinsic_matrix = np.linalg.pinv(self.extrinsic_matrix_inv)
 
         self.intrinsic_matrix_inv = np.linalg.pinv(self.intrinsic_matrix)
+
 
     def blockDetector(self):
         """!
@@ -296,7 +313,56 @@ class Camera():
                 cv2.circle(modified_image, (px, py), 4, (0, 255, 0), -1)
 
         self.GridFrame = modified_image
-     
+
+
+    
+    def solve_extrinsic(self):
+        """ Solve extrinsic matrix using detected board tags and their world coordinates
+        Origin (0,0) is at top-left corner of the board"""
+        
+        obj_points_list = []
+        img_points_list = []
+
+        # detect all four board tags
+        for detection in self.tag_detections:
+            tag_id = detection.id
+            if tag_id in self.boardTag_center:
+                x,y = self.boardTag_center[tag_id]
+
+                half = 25    # half tag size in mm
+                # get the corner positions of the tag
+                obj_points_list.extend([
+                    [x-half, y-half, 0],
+                    [x+half, y-half, 0],
+                    [x-half, y+half, 0],
+                    [x+half, y+half, 0]
+                ])  # obj_points = measured world coordinates
+
+                # img_points = detected pixel coordiantes of the tag 
+                for corner in detection.corners:
+                    img_points_list.append([corner.x, corner.y])
+        
+        if (len(obj_points_list) <4):
+            return None
+        # convert obj_points and img_points to np.array float64 for openCV
+        obj_points = np.array(obj_points_list, dtype=DTYPE)
+        img_points = np.array(img_points_list, dtype=DTYPE)
+
+        # use openCV solvePnP to get rotation and translation vectors
+        success, rvec, tvec = cv2.solvePnP(
+            obj_points, img_points, self.intrinsic_matrix, self.dist_coeff, flags=cv2.SOLVEPNP_ITERATIVE)
+
+        if success:
+            # Convert rotation vector to 3x3 matrix
+            R, _ = cv2.Rodrigues(rvec)
+                
+            # Create the 3x4 Extrinsic Matrix [R | t]
+            extrinsic_matrix = np.hstack((R, tvec))
+            self.extrinsic_matrix = extrinsic_matrix
+            self.camera_calibrated = True   # both intrinsic and extrinsic calibration completed
+
+
+
     def drawTagsInRGBImage(self, msg):
         """
         @brief      Draw tags from the tag detection
@@ -312,8 +378,9 @@ class Camera():
         # Write your code here
         # Check if msg is valid and contains detections
         if msg is not None and hasattr(msg, 'detections'):
+            
             for detection in msg.detections:
-                
+
                 # 1. Draw Center Point
                 cx = int(detection.centre.x)
                 cy = int(detection.centre.y)
@@ -329,6 +396,13 @@ class Camera():
                     pts = np.array([[int(pt.x), int(pt.y)] for pt in detection.corners], np.int32)
                     pts = pts.reshape((-1, 1, 2))
                     cv2.polylines(modified_image, [pts], isClosed=True, color=(255, 0, 0), thickness=2)
+
+                # determine the order of corners, need to match image_points and obj_points order in solve_extrinsic
+                for i, corner in enumerate(detection.corners):
+                    cv2.circle(self.VideoFrame, (int(corner.x), int(corner.y)), 5, (255, 0, 0), -1)
+                    cv2.putText(self.VideoFrame, str(i), (int(corner.x), int(corner.y) - 10), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+
 
         self.TagImageFrame = modified_image
 
@@ -361,9 +435,15 @@ class TagDetectionListener(Node):
         self.camera = camera
 
     def callback(self, msg):
-        self.camera.tag_detections = msg
+        if msg is not None and hasattr(msg, 'detection'):
+            self.camera.tag_detections = msg
+
+            if self.intrinsic_matrix is not None:   # intrinsic calibration data loaded
+                self.solve_extrinsic()  
+
         if np.any(self.camera.VideoFrame != 0):
             self.camera.drawTagsInRGBImage(msg)
+
 
 
 class CameraInfoListener(Node):
