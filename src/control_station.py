@@ -88,10 +88,8 @@ class Gui(QMainWindow):
         # TODO: Add more lines here to add more buttons
         # To make a button activate a state, copy the lines for btnUser3 but change 'execute' to whichever state you want
         self.ui.btnUser1.setText('Open Gripper')
-        #self.ui.btnUser1.clicked.connect(lambda: self.rxarm.gripper.release())
         self.ui.btnUser1.clicked.connect(lambda: self.rxarm.gripper_release())
         self.ui.btnUser2.setText('Close Gripper')
-      #  self.ui.btnUser2.clicked.connect(lambda: self.rxarm.gripper.grasp())
         self.ui.btnUser2.clicked.connect(lambda: self.rxarm.gripper_grasp())
         self.ui.btnUser3.setText('Execute')
         self.ui.btnUser3.clicked.connect(partial(nxt_if_arm_init, 'execute'))
@@ -108,11 +106,11 @@ class Gui(QMainWindow):
         self.ui.btnUser11.clicked.connect(partial(nxt_if_arm_init, 'pick'))
         self.ui.btnUser12.setText('Click Place')
         self.ui.btnUser12.clicked.connect(partial(nxt_if_arm_init, 'place'))
-        self.ui.btnUser9.setText('Test')
-        self.ui.btnUser9.clicked.connect(partial(nxt_if_arm_init, 'task_test'))
+        self.ui.btnUser9.setText('Get Location')
+        self.ui.btnUser9.clicked.connect(partial(nxt_if_arm_init, 'locate'))
 
 
-        self.ui.btnUser4.setText('Show Camera')
+        self.ui.btnUser4.setText('Capture Image')
         self.ui.btnUser4.clicked.connect(lambda: self.showCam())
 
         # Sliders

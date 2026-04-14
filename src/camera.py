@@ -7,6 +7,7 @@ Class to represent the camera.
 import rclpy
 from rclpy.node import Node
 from rclpy.executors import SingleThreadedExecutor, MultiThreadedExecutor
+import rclpy.logging
 
 import cv2
 import time
@@ -18,6 +19,9 @@ from sensor_msgs.msg import Image, CameraInfo
 from apriltag_msgs.msg import *
 from cv_bridge import CvBridge, CvBridgeError
 import os
+import sys
+from pathlib import Path
+
 
 import yaml
 DTYPE = np.float64
@@ -33,6 +37,8 @@ class Camera():
         """!
         @brief      Construcfalsets a new instance.
         """
+        self.logger = rclpy.logging.get_logger('camera_helper')
+
         self.VideoFrame = np.zeros((720,1280, 3)).astype(np.uint8)
         self.GridFrame = np.zeros((720,1280, 3)).astype(np.uint8)
         self.TagImageFrame = np.zeros((720,1280, 3)).astype(np.uint8)
@@ -62,19 +68,21 @@ class Camera():
 
         # April tag IDS and positions for building the board
         self.boardTag_center =  {  
-            4: [250, 200, 0],          # top-left
-            3: [750, 200, 0],        # top-right
-            1: [250, 500, 0],         # bottom-left
-            2: [750, 500, 0]         # bottom-right
+            4: [-250, 275, 0],        # top-left
+            3: [250, 275, 0],         # top-right
+            1: [-250, -25, 0],        # bottom-left
+            2: [250, -25, 0]          # bottom-right
         }   
 
-        # load the calibration data
-        base_path = os.path.dirname(os.path.abspath(__file__))
-        calib_path = os.path.join(base_path, "calibration_data")
-        calib_data = os.path.join(calib_path, "ost.yaml")
+        # self.boardTag_center =  {  origin at top left corner or board
+        #     4: [250, 200, 0],          # top-left
+        #     3: [750, 200, 0],        # top-right
+        #     1: [250, 500, 0],         # bottom-left
+        #     2: [750, 500, 0]         # bottom-right
+        # }   
 
-      #  calibration_file = "calibration_data/ost.yaml"
-        self.loadCameraCalibration(calib_data)
+        # initalize intrinsic and extrinsic matrix
+        #self.load_camera_matrix()
 
     def processVideoFrame(self):
         """!
@@ -210,7 +218,19 @@ class Camera():
         self.intrinsic_matrix_inv = np.linalg.pinv(self.intrinsic_matrix)
         
 
-
+    def load_camera_matrix(self):
+        """initialize intrinsic and extrinsic matrix
+        Use factory calibration data for intrinsic matrix.
+        Extrinsic parameters needs to be solved with solve_extrinsic() for every setup"""
+        self.extrinsic_matrix = np.array([-0.9996, -0.011, -0.0255, 55.6461,
+                                          -0.0115, 0.9998, 0.0169, 245.2637,
+                                          0.0253, 0.0172, 0.9995, 1037.8059,
+                                          0, 0, 0, 1
+                                    ], dtype=DTYPE).reshape(4,4)
+        
+        self.intrinsic_matrix = np.array([908.0358, 0.0, 650.7092, 
+                                            0.0, 908.0656, 359.6438, 
+                                            0.0, 0.0, 1.0], dtype=DTYPE).reshape((3, 3))        
     def blockDetector(self):
         """!
         @brief      Detect blocks from rgb
@@ -319,38 +339,87 @@ class Camera():
         self.GridFrame = modified_image
 
 
-    
+
+
+
+    def coord_pixel_to_world(self, u, v, depth):
+        '''
+        Convert pixel coordinates (from camera frame) to world coordinates
+        u: pixel x coordinate
+        v: pixel y coordinate
+        depth: depth value at pixel (u, v) # TODO: find its units
+        '''
+
+        num_x_lines = len(self.grid_x_points)
+        num_y_lines = len(self.grid_y_points)
+        x_step = 1280 / num_x_lines
+        y_step = 720 / num_y_lines   
+
+        x_idx = int(u / x_step)
+        y_idx = int(v / y_step)
+        #sys.exit(f"coord: {self.grid_x_points[x_idx], self.grid_y_points[y_idx], depth}")
+
+        print(f"gridX: {self.grid_x_points[x_idx]}, gridY: {self.grid_y_points[y_idx]}")
+
+        return [self.grid_x_points[x_idx], self.grid_y_points[y_idx], depth] # TODO: determine if we need to convert raw depth to smth else
+
+
+
+    def pixel_to_World(self, u, v, z):
+        """Convert Pixel coordinates to World using extrinsic matrix """
+        if self.extrinsic_matrix is None: 
+            return
+
+        pixel_vector = np.array([[u],[v], [z]])
+        camera_ray = self.intrinsic_matrix_inv @ pixel_vector
+
+        # 2. Invert the Extrinsic Matrix to get the Camera-to-World transformation
+        R = self.extrinsic_matrix[:3, :3]
+        t = self.extrinsic_matrix[:3, 3:]
+        
+        R_inv = R.T              # Inverse of a rotation matrix is its transpose
+        t_inv = -R_inv @ t       # Physical location of the camera lens in the World
+        
+        # 3. Rotate the camera ray into the World orientation
+        world_ray = R_inv @ camera_ray
+        
+        # 4. Find where the ray hits the board (Line-Plane Intersection)
+        scale_factor = -t_inv[2, 0] / world_ray[2, 0]
+        
+        # 5. Plug the scale factor back in to get the exact X and Y world coordinates
+        world_point = t_inv + (scale_factor * world_ray)
+        print(f"X: {world_point[0, 0]}, Y: {world_point[1, 0]}")     
+
+        return [world_point[0, 0], -world_point[1, 0], 0.0] # invert y axis to align with motor direction
+
+
+
     def solve_extrinsic(self):
         """ Solve extrinsic matrix using detected board tags and their world coordinates
-        Origin (0,0) is at top-left corner of the board"""
+        Origin (0,0) is at the robot's position. Use boardTag_center for the position of April tags"""
+
+        if self.tag_detections is None or not hasattr(self.tag_detections, 'detections'):
+            return
+
 
         obj_points_list = []
         img_points_list = []
 
         # detect all four board tags
-        for detection in self.tag_detections:
+        for detection in self.tag_detections.detections:
             tag_id = detection.id
             if tag_id in self.boardTag_center:
-                x,y = self.boardTag_center[tag_id]
+                x,y,z = self.boardTag_center[tag_id]
 
-               # half = 25    # half tag size in mm
-                # get the corner positions of the tag
-                # obj_points_list.extend([
-                #     [x-half, y-half, 0],
-                #     [x+half, y-half, 0],
-                #     [x-half, y+half, 0],
-                #     [x+half, y+half, 0]
-                # ])  # obj_points = measured world coordinates
-                obj_points_list.append([x,y, 0])
+                # obj_points = measured world coordinates
+                obj_points_list.append([x,y,z])
 
                 # img_points = detected pixel coordiantes of the tag 
-                # for corner in detection.corners:
-                #     img_points_list.append([corner.x, corner.y])
                 img_points_list.append([detection.centre.x,detection.centre.y])
-                debug_img = self.VideoFrame.copy()
-                window_name = f"Debug_Tag_{tag_id}"
-                cv2.imshow(window_name, cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR))
-                cv2.waitKey(1)
+                # debug_img = self.VideoFrame.copy()
+                # window_name = f"Debug_Tag_{tag_id}"
+                # cv2.imshow(window_name, cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR))
+                # cv2.waitKey(1)
                     
         if (len(obj_points_list) <4):
             return None
@@ -363,11 +432,10 @@ class Camera():
             obj_points, img_points, self.intrinsic_matrix, self.dist_coeff, flags=cv2.SOLVEPNP_ITERATIVE)
 
 
-
         if success:
             # Convert rotation vector to 3x3 matrix
             R, _ = cv2.Rodrigues(rvec)
-                
+                    
             # Create the 4x4 Extrinsic Matrix [R | t]
             extrinsic_matrix = np.eye(4, dtype=DTYPE)
             extrinsic_matrix[:3, :3] = R
@@ -375,20 +443,28 @@ class Camera():
             
             self.extrinsic_matrix = extrinsic_matrix
             self.camera_calibrated = True   # both intrinsic and extrinsic calibration completed
-
             try:
-                base_path = os.path.dirname(os.path.abspath(__file__))
-                file_path = os.path.join(base_path, "extrinsic_matrix.txt")
+                # debug_img = self.VideoFrame.copy()
+                # window_name = f"Debug_Tag_{tag_id}"
+                # cv2.imshow(window_name, cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR))
+                # cv2.waitKey(1)
+                home_dir = str(Path.home())
+                save_dir = os.path.join(home_dir, "robot_data")
+                extrinsic_path = os.path.join(save_dir, "extrinsic_matrix.txt")
+                intrinsic_path = os.path.join(save_dir, "intrinsic_matrix.txt")
+
+                # base_path = os.path.dirname(os.path.abspath(__file__))
+                # file_path = os.path.join(base_path, "extrinsic_matrix.txt")
                 
-                with open(file_path, "w") as f:
+                with open(extrinsic_path, "w") as f:
                     f.write("Extrinsic Matrix (World to Camera):\n")
-                    # Use numpy's array2string for clean formatting
                     matrix_str = np.array2string(extrinsic_matrix, precision=4, suppress_small=True)
                     f.write(matrix_str)
+   
                 
-                self.get_logger().info("Successfully saved extrinsic matrix to extrinsic_matrix.txt")
+                print("Successfully saved extrinsic matrix to extrinsic_matrix.txt")
             except Exception as e:
-                self.get_logger().error(f"Failed to write to file: {str(e)}")
+                print(f"Failed to write to file: {str(e)}")
 
 
 
@@ -404,6 +480,7 @@ class Camera():
                     id of the tag: detection.id
         """
         modified_image = self.VideoFrame.copy()
+
         # Write your code here
         # Check if msg is valid and contains detections
         if msg is not None and hasattr(msg, 'detections'):
@@ -426,11 +503,12 @@ class Camera():
                     pts = pts.reshape((-1, 1, 2))
                     cv2.polylines(modified_image, [pts], isClosed=True, color=(255, 0, 0), thickness=2)
 
-                # determine the order of corners, need to match image_points and obj_points order in solve_extrinsic
                 for i, corner in enumerate(detection.corners):
                     cv2.circle(self.VideoFrame, (int(corner.x), int(corner.y)), 5, (255, 0, 0), -1)
                     cv2.putText(self.VideoFrame, str(i), (int(corner.x), int(corner.y) - 10), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+
+            #    sys.exit("april tag callback")
 
 
         self.TagImageFrame = modified_image
@@ -464,14 +542,16 @@ class TagDetectionListener(Node):
         self.camera = camera
 
     def callback(self, msg):
-        if msg is not None and hasattr(msg, 'detection'):
-            self.camera.tag_detections = msg
-
-        if self.camera.intrinsic_matrix is not None:   # intrinsic calibration data loaded
-            self.camera.solve_extrinsic()  
-
+    
+        # if self.camera.intrinsic_matrix is not None:   # intrinsic calibration data loaded
+        #     self.camera.solve_extrinsic()  
+    
         if np.any(self.camera.VideoFrame != 0):
+            self.camera.tag_detections = msg
             self.camera.drawTagsInRGBImage(msg)
+
+            if self.camera.extrinsic_matrix is None: 
+                self.camera.solve_extrinsic()
 
 
 
@@ -484,7 +564,8 @@ class CameraInfoListener(Node):
 
     def callback(self, data):
         self.camera.intrinsic_matrix = np.reshape(data.k, (3, 3))
-        # print(self.camera.intrinsic_matrix)
+        self.camera.intrinsic_matrix_inv = np.linalg.pinv(self.camera.intrinsic_matrix)
+
 
 
 class DepthListener(Node):
