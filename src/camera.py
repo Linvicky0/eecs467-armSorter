@@ -7,7 +7,6 @@ Class to represent the camera.
 import rclpy
 from rclpy.node import Node
 from rclpy.executors import SingleThreadedExecutor, MultiThreadedExecutor
-import rclpy.logging
 
 import cv2
 import time
@@ -42,7 +41,7 @@ class Camera():
         self.VideoFrame = np.zeros((720,1280, 3)).astype(np.uint8)
         self.GridFrame = np.zeros((720,1280, 3)).astype(np.uint8)
         self.TagImageFrame = np.zeros((720,1280, 3)).astype(np.uint8)
-        self.DepthFrameRaw = np.zeros((720,1280)).astype(np.uint16)
+        self.DepthFrameRaw = None # np.zeros((720,1280)).astype(np.uint16)
         """ Extra arrays for colormaping the depth image"""
         self.DepthFrameHSV = np.zeros((720,1280, 3)).astype(np.uint8)
         self.DepthFrameRGB = np.zeros((720,1280, 3)).astype(np.uint8)
@@ -52,7 +51,7 @@ class Camera():
         self.camera_calibrated = False
         self.intrinsic_matrix = None
         self.extrinsic_matrix = None
-        self.dist_coeff = None
+        self.dist_coeff = np.array([0.130053, -0.216480, -0.002483, -0.006660, 0.000000])
         self.last_click = np.array([0, 0]) # This contains the last clicked position
         self.new_click = False # This is automatically set to True whenever a click is received. Set it to False yourself after processing a click
         self.rgb_click_points = np.zeros((5, 2), int)
@@ -95,6 +94,8 @@ class Camera():
         """!
         @brief Converts frame to colormaped formats in HSV and RGB
         """
+        if (self.DepthFrameRaw is None):
+            return 
         self.DepthFrameHSV[..., 0] = self.DepthFrameRaw >> 1
         self.DepthFrameHSV[..., 1] = 0xFF
         self.DepthFrameHSV[..., 2] = 0x9F
@@ -261,6 +262,8 @@ class Camera():
                     TODO: Implement a blob detector to find blocks in the depth image
         """
         # 1. Take a copy of the raw depth frame
+        if self.DepthFrameRaw is None:
+            return
         depth_img = self.DepthFrameRaw.copy()
         
         # 2. Threshold depth to isolate objects resting ON the table
@@ -342,35 +345,34 @@ class Camera():
 
 
 
-    def coord_pixel_to_world(self, u, v, depth):
+    def coord_pixel_to_world(self, u, v, z):
         '''
         Convert pixel coordinates (from camera frame) to world coordinates
         u: pixel x coordinate
         v: pixel y coordinate
         depth: depth value at pixel (u, v) # TODO: find its units
         '''
+        index = np.array([u, v, 1]).reshape((3,1))
+        pos_camera = z * np.matmul(self.intrinsic_matrix_inv, index)
+        temp_pos = np.array([pos_camera[0][0], pos_camera[1][0], pos_camera[2][0], 1]).reshape((4,1))
+        extrinsic_matrix_inv = np.linalg.inv(self.extrinsic_matrix)
+        world_pos = np.matmul(extrinsic_matrix_inv, temp_pos)
+        return world_pos.flatten()[:3]
 
-        num_x_lines = len(self.grid_x_points)
-        num_y_lines = len(self.grid_y_points)
-        x_step = 1280 / num_x_lines
-        y_step = 720 / num_y_lines   
-
-        x_idx = int(u / x_step)
-        y_idx = int(v / y_step)
-        #sys.exit(f"coord: {self.grid_x_points[x_idx], self.grid_y_points[y_idx], depth}")
-
-        print(f"gridX: {self.grid_x_points[x_idx]}, gridY: {self.grid_y_points[y_idx]}")
-
-        return [self.grid_x_points[x_idx], self.grid_y_points[y_idx], depth] # TODO: determine if we need to convert raw depth to smth else
+    
 
 
-
-    def pixel_to_World(self, u, v, z):
+    def pixel_to_World(self, u, v,z):
         """Convert Pixel coordinates to World using extrinsic matrix """
         if self.extrinsic_matrix is None: 
-            return
+            print("extrinsic matrix is undefined")
+            return None
 
-        pixel_vector = np.array([[u],[v], [z]])
+        z = 986 - z
+        print(f"depth: {z}")
+
+        pixel_vector = np.array([[u],[v], [1]])
+
         camera_ray = self.intrinsic_matrix_inv @ pixel_vector
 
         # 2. Invert the Extrinsic Matrix to get the Camera-to-World transformation
@@ -388,9 +390,9 @@ class Camera():
         
         # 5. Plug the scale factor back in to get the exact X and Y world coordinates
         world_point = t_inv + (scale_factor * world_ray)
-        print(f"X: {world_point[0, 0]}, Y: {world_point[1, 0]}")     
+        print(f"worldX: {world_point[0, 0]}, worldY: {world_point[1, 0]}, worldZ: {z}")     
 
-        return [world_point[0, 0], -world_point[1, 0], 0.0] # invert y axis to align with motor direction
+        return [world_point[0, 0], world_point[1, 0], z] # invert y axis to align with motor direction
 
 
 

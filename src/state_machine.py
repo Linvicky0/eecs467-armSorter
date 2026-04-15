@@ -232,8 +232,12 @@ class StateMachine():
 
         self.camera.new_click = False
         pt = self.camera.last_click
+        z = self.camera.DepthFrameRaw[pt[1]][pt[0]]
+        print(f"pixelX: {pt[0]}, pixelY: {pt[1]}, depth: {z}")
+        self.rxarm.arm.get_joint_positions()
 
-        self.camera.pixel_to_World(pt[0], pt[1],1)
+
+        self.camera.pixel_to_World(pt[0], pt[1],0)
         # if self.rxarm.estop:
         #     self.next_state = "estop"
         self.next_state = "idle"
@@ -250,15 +254,21 @@ class StateMachine():
         self.camera.new_click = False
         pt = self.camera.last_click
         z = self.camera.DepthFrameRaw[pt[1]][pt[0]]
+        z = 990 - z
+        if (z <0):
+            z = 0
+
         click_uvd = np.append(pt, z)
         target_world_pos, block_ori = self.get_block_xyz_from_click(click_uvd)
-
+        if target_world_pos is None: 
+            return 
+        
+        target_world_pos[2] = z
         self.rxarm.arm.go_to_home_pose(moving_time=2,
                                     accel_time=0.5,
                                     blocking=True)
         self.status_message = "State: Pick - Click to pick"
         self.current_state = "pick"
-        self
         self.auto_pick(target_world_pos, block_ori)
         # if self.rxarm.estop:
         #     self.next_state = "estop"
@@ -267,6 +277,7 @@ class StateMachine():
     def auto_pick(self, _target_world_pos, block_ori, phi=np.pi/2, double_check=False, to_sky=False):
         # if to_sky:
         #     _target_world_pos = [-345, 0, 0]
+        
         target_world_pos = copy.deepcopy(_target_world_pos)
         above_world_pos = copy.deepcopy(_target_world_pos)
         print("!!!!!!!!!!!!!!!!!!!!!!!!!!! pick pos:", target_world_pos)
@@ -275,34 +286,70 @@ class StateMachine():
         if xy_norm >= 315 and xy_norm<=430:
             target_world_pos[2] = target_world_pos[2] + 1/55 * xy_norm
             print(1/50 * xy_norm)
+
+        if (target_world_pos[2] < 10): # height too low
+            return
+        
         ############ Planning #############
         # print("[PICK] Planning waypoints...")
         pick_stable = True
-        pick_height_offset = 10 + 19 # + 5
-        pick_wrist_offset = 0 # np.pi/18.0/3.0
-        target_world_pos[2] = target_world_pos[2] + pick_height_offset
+        pick_height_offset = 100
+        pick_wrist_offset = np.pi/18.0/3.0
+        target_world_pos[2] = target_world_pos[2]  + pick_height_offset
         above_world_pos[2] = above_world_pos[2] + pick_height_offset + 80
 
         reachable_low, reachable_high = False, False
 
         # Try vertical reach with phi = pi/2
-        reachable_low, joint_angles_2 = IK_geometric([target_world_pos[0], 
-                                                    target_world_pos[1],
-                                                     10,
-                                                  phi])
+        joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
+                                                                              y=target_world_pos[0]/1000, # position converted to meters
+                                                                              z=target_world_pos[2]/1000, 
+                                                                              pitch = phi,
+                                                                              execute = False)
+        joint_angles_2[0] = -joint_angles_2[0]  # invert polarity of x axis
+        print(f"target angles: {joint_angles_2} ")
+
+        # reachable_low, joint_angles_2 = IK_geometric([target_world_pos[0], 
+        #                                             target_world_pos[1],
+        #                                              target_world_pos[2],
+        #                                           phi])
         # phi = np.pi/2
         if reachable_low:
-            # start = joint_angles_2[0]
-            # move_time, ac_time = self.calMoveTime(start)
-            # self.rxarm.arm.set_joint_positions(joint_angles_2,
-            #                             moving_time=move_time,
-            #                             accel_time=ac_time,
-            #                             blocking=True)
+            print("reachable low valid")
+            start = joint_angles_2[0]
+            move_time, accel_time = self.calMoveTime(joint_angles_2)
+            # go to the block position with a height offset
+            self.rxarm.arm.set_joint_positions(joint_angles_2,
+                                        moving_time=2,
+                                        accel_time=0.7,
+                                        blocking=True)
+            
+            # EE descends to grab the object
+            descend_offset = -70/1000   # tune later
+            print(f"descending angles: {joint_angles_2} ")
+            if reachable_low:
+                print("EE descending")
+                move_time, ac_time = self.calMoveTime(joint_angles_2)
+                self.rxarm.arm.set_ee_cartesian_trajectory(z=descend_offset, moving_time =3)
+
+                # self.rxarm.arm.set_single_joint_position(joint_angles_2,
+                #                             moving_time=self.rxarm.moving_time,
+                #                             accel_time=self.rxarm.accel_time,
+                #                             blocking=True)
+                self.rxarm.gripper_grasp()
+                return
+            
+            
+
+            
             while not reachable_high:
-                reachable_high, joint_angles_1 = IK_geometric([above_world_pos[0], 
-                                                            above_world_pos[1],
-                                                            above_world_pos[2],
-                                                            phi])
+        
+                joint_angles_1, reachable_high = self.rxarm.arm.set_ee_pose_components(x=above_world_pos[1]/1000, 
+                                                                              y=above_world_pos[0]/1000, 
+                                                                              z=above_world_pos[2]/1000, 
+                                                                              pitch = phi)
+                joint_angles_1[0] = -joint_angles_1[0]  # invert polarity of x axis
+
                 if reachable_high:
                     break
                 if above_world_pos[2] - target_world_pos[2] > 40:
@@ -314,6 +361,7 @@ class StateMachine():
                     phi = phi - np.pi/18.0
                 if phi <= 0:
                     break
+            return
 
         # add horizontal reach by detecting distance between the projection of arm and the target point
         # if self.check_path_clean(target_world_pos):
@@ -809,8 +857,8 @@ class StateMachine():
         u, v, z = click_uvd[0], click_uvd[1], click_uvd[2]
         
         # Use the function we just added to your Camera class!
-       # world_pos = self.camera.coord_pixel_to_world(u, v, z)
-        world_pos = self.camera.pixel_to_World(u,v,1)
+        #world_pos = self.camera.coord_pixel_to_world(u, v, z)
+        world_pos = self.camera.pixel_to_World(u,v,z)
         
         # To get the true orientation, you'd cross-reference this click with 
         # self.camera.block_detections. For now, we will default to 0.0 rad.

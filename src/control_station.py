@@ -20,6 +20,8 @@ from resource.ui import Ui_MainWindow
 from rxarm import RXArm, RXArmThread
 from camera import Camera, VideoThread
 from state_machine import StateMachine, StateMachineThread
+from kinematics import IK_geometric
+
 """ Radians to/from  Degrees conversions """
 D2R = np.pi / 180.0
 R2D = 180.0 / np.pi
@@ -70,7 +72,7 @@ class Gui(QMainWindow):
         """
         # Video
         self.ui.videoDisplay.setMouseTracking(True)
-        self.ui.videoDisplay.mouseMoveEvent = self.trackMouse
+      #  self.ui.videoDisplay.mouseMoveEvent = self.trackMouse
         self.ui.videoDisplay.mousePressEvent = self.calibrateMousePress
 
         # Buttons
@@ -81,7 +83,7 @@ class Gui(QMainWindow):
         self.ui.btn_init_arm.clicked.connect(self.initRxarm)
         self.ui.btn_torq_off.clicked.connect(lambda: self.rxarm.disable_torque())
         self.ui.btn_torq_on.clicked.connect(lambda: self.rxarm.enable_torque())
-        self.ui.btn_sleep_arm.clicked.connect(lambda: self.rxarm.sleep())
+        self.ui.btn_sleep_arm.clicked.connect(lambda: self.sleep())
         self.ui.btn_calibrate.clicked.connect(partial(nxt_if_arm_init, 'calibrate'))
 
         # User Buttons
@@ -194,6 +196,49 @@ class Gui(QMainWindow):
 
     """ Other callback functions attached to GUI elements"""
 
+    def sleep(self):
+        self.rxarm.arm.go_to_home_pose(moving_time = self.rxarm.moving_time,
+                                      accel_time = self.rxarm.accel_time,
+                                      blocking= True)
+        time.sleep(0.1)
+        ee_pose = self.rxarm.arm.get_ee_pose()
+        x = ee_pose[0, 3]
+        y = ee_pose[1, 3]
+        z = ee_pose[2, 3]
+
+        print(f"home EE pose {x:.3f}, Y: {y:.3f}, Z: {z:.3f}")
+
+
+        valid, joint_angles = IK_geometric([121,0,65,0.583])
+        print(f"our IK for sleep {valid}, angles: {joint_angles}")
+       # if (valid):
+           # self.rxarm.set_positions(joint_angles)
+
+    #    else:
+        joint_angles, valid = self.rxarm.arm.set_ee_pose_components(x=0.121, y=0.001, z=0.065, pitch=0.583)
+        print(f"instructor IK for sleep, {valid}, angles: {joint_angles}")
+        if valid:
+            print("using instructor's IK to move")
+            self.rxarm.set_positions(joint_angles)
+        else:
+            self.rxarm.arm.go_to_sleep_pose(moving_time = self.rxarm.moving_time,
+                                    accel_time = self.rxarm.accel_time,
+                                    blocking= True)
+            
+        time.sleep(0.1)
+
+        ee_pose = self.rxarm.arm.get_ee_pose()
+        x = ee_pose[0, 3]
+        y = ee_pose[1, 3]
+        z = ee_pose[2, 3]
+        r31 = ee_pose[2, 0]
+        r32 = ee_pose[2, 1]
+        r33 = ee_pose[2, 2]
+        phi = np.arctan2(-r31, np.sqrt(r32**2 + r33**2))
+
+        print(f"sleep EE pose {x:.3f}, Y: {y:.3f}, Z: {z:.3f}, phi: {phi:.3f}")
+
+
     def estop(self):
         self.rxarm.disable_torque()
         self.sm.set_next_state('estop')
@@ -253,10 +298,11 @@ class Gui(QMainWindow):
         # You should make the mouseover text display the (x, y, z) coordinates of the pixel being hovered over
 
         pt = mouse_event.pos()
-        if self.camera.DepthFrameRaw.any() != 0:
+        if self.camera.DepthFrameRaw.any() != 0 and self.camera.DepthFrameRaw is not None:
             z = self.camera.DepthFrameRaw[pt.y()][pt.x()]
             self.ui.rdoutMousePixels.setText("(%.0f,%.0f,%.0f)" %
                                              (pt.x(), pt.y(), z))
+
             self.ui.rdoutMouseWorld.setText("(-,-,-)")
 
     def calibrateMousePress(self, mouse_event):
