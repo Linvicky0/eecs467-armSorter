@@ -72,7 +72,7 @@ class Gui(QMainWindow):
         """
         # Video
         self.ui.videoDisplay.setMouseTracking(True)
-      #  self.ui.videoDisplay.mouseMoveEvent = self.trackMouse
+        self.ui.videoDisplay.mouseMoveEvent = self.trackMouse
         self.ui.videoDisplay.mousePressEvent = self.calibrateMousePress
 
         # Buttons
@@ -298,7 +298,7 @@ class Gui(QMainWindow):
         # You should make the mouseover text display the (x, y, z) coordinates of the pixel being hovered over
 
         pt = mouse_event.pos()
-        if self.camera.DepthFrameRaw.any() != 0 and self.camera.DepthFrameRaw is not None:
+        if self.camera.DepthFrameRaw.any() != 0:
             z = self.camera.DepthFrameRaw[pt.y()][pt.x()]
             self.ui.rdoutMousePixels.setText("(%.0f,%.0f,%.0f)" %
                                              (pt.x(), pt.y(), z))

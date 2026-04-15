@@ -762,8 +762,17 @@ class InterbotixArmXSInterface:
         ]
         return mr.FKinSpace(self.robot_des.M, self.robot_des.Slist, joint_states)
 
+
     def get_ee_angles(self):
-        return self.core.joint_states.position
+        T = self.get_ee_pose()
+
+        # Extract the rotation components
+        r31 = T[2, 0]
+        r33 = T[2, 2]
+
+        # Phi is the global pitch of the end effector
+        phi = np.arctan2(-r31, r33)
+        return phi
 
 
     def capture_joint_positions(self) -> None:
@@ -789,7 +798,7 @@ class InterbotixArmXSInterface:
         """
         self.core.get_node().logdebug('Getting joint states')
         for name in self.group_info.joint_names:
-            print(f"joint names: {name}")
+            print(f"joint names: {name}, position {self.core.joint_states.position[self.core.js_index_map[name]]}")
 
         with self.core.js_mutex:
             return [
