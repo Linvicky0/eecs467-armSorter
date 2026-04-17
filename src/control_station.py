@@ -173,7 +173,6 @@ class Gui(QMainWindow):
         """
         if (self.ui.radioVideo.isChecked()):
             self.ui.videoDisplay.setPixmap(QPixmap.fromImage(rgb_image))
-      
         #cv2.waitKey(1)
         if (self.ui.radioDepth.isChecked()):
             self.ui.videoDisplay.setPixmap(QPixmap.fromImage(depth_image))
@@ -298,6 +297,8 @@ class Gui(QMainWindow):
         # You should make the mouseover text display the (x, y, z) coordinates of the pixel being hovered over
 
         pt = mouse_event.pos()
+        if self.camera.DepthFrameRaw is None:
+            return
         if self.camera.DepthFrameRaw.any() != 0:
             z = self.camera.DepthFrameRaw[pt.y()][pt.x()]
             self.ui.rdoutMousePixels.setText("(%.0f,%.0f,%.0f)" %
