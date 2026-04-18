@@ -237,6 +237,7 @@ class StateMachine():
 
         self.camera.new_click = False
         pt = self.camera.last_click
+
         d = self.camera.DepthFrameRaw[pt[1]][pt[0]]
         print(f"pixelX: {pt[0]}, pixelY: {pt[1]}, depth: {d}")
         self.rxarm.arm.get_joint_positions()
@@ -244,7 +245,7 @@ class StateMachine():
 
 
         self.camera.pixel_to_World(pt[0], pt[1],d) # more accurate
-        # self.camera.coord_pixel_to_world(pt[0], pt[1], z)
+        #self.camera.coord_pixel_to_world(pt[0], pt[1], d)
         # if self.rxarm.estop:
         #     self.next_state = "estop"
 

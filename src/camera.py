@@ -61,7 +61,7 @@ class Camera():
         self.grid_x_points = np.arange(-450, 500, 50)
         self.grid_y_points = np.arange(-175, 525, 50)
         self.grid_points = np.array(np.meshgrid(self.grid_x_points, self.grid_y_points))
-        self.tag_detections = np.array([])
+        self.tag_detections = None
         self.tag_locations = [[-250, -25], [250, -25], [250, 275], [-250, 275]]
         """ block info """
         self.block_contours = []
@@ -84,34 +84,124 @@ class Camera():
             2: [250, -25, 0]          # bottom-right
         }   
 
-        self.current_src_pts = None
+        # homography transformation variables
+        self.homography = False
+        self.H = None
 
+        # maximum depth from camera to board, used for calculating z
         self.max_depth = None
 
-        # calculate homography
-       # self.Homography_Transform()
 
 
 
     def Homography_Transform(self, image):
+
+        if self.extrinsic_matrix is None:
+            return image
+
+        width = 1000    # maintain the relative aspect ratio (1000x650)
+        height = 650
+        offset = 50     # add a bit of offset to display entire board
+        dest_pts = {
+            'topleft': [offset, offset],  
+            'topright': [offset+width,offset],  
+            'bottomleft': [offset,offset+height],   
+            'bottomright': [offset+width,offset+height]    
+        }
     
-        # dest_pts = np.array([
-        #     [50,  100],   # Maps to Tag 4 (World: -250, 275)
-        #     [550, 100],   # Maps to Tag 3 (World:  250, 275)
-        #     [50,  400],   # Maps to Tag 1 (World: -250, -25)
-        #     [550, 400]    # Maps to Tag 2 (World:  250, -25)
-        # ], dtype=np.float32)
+        # use world coordiantes of board's corners
+        world_corners = {
+           'topleft': [-500, 475],
+           'topright': [500, 475],
+           'bottomleft': [-500, -175],
+           'bottomright': [500, -175]
+        }
 
-        dest_pts = np.array([100, 100, 
-                650, 100,
-                100, 650,
-                650, 650,
-               ]).reshape((4, 2))
+        ordered_keys = ['topleft', 'topright', 'bottomleft', 'bottomright']
+        src_pts_list = []
+        dest_pts_list = []
+
+        for key in ordered_keys:
+            src_world_x = world_corners[key][0]
+            src_world_y = world_corners[key][1]
+            src_pts_list.append(self.world_to_pixel(src_world_x, src_world_y))
+            dest_pts_list.append((dest_pts[key][0], dest_pts[key][1]))
 
 
-        H,_ = cv2.findHomography(self.current_src_pts, dest_pts)
+        if len(src_pts_list) !=4:
+            return image
+
+        src_arr = np.array(src_pts_list, dtype=DTYPE)
+        dest_arr = np.array(dest_pts_list, dtype=DTYPE)
+
+        H,_ = cv2.findHomography(src_arr, dest_arr)
+        self.H = H
         new_img = cv2.warpPerspective(image, H, (image.shape[1], image.shape[0]))
+        self.homography = True
         return new_img
+    
+
+    def undo_homography(self, u_warped, v_warped):
+        """undo homography transformation to convert the pixel coordiantes to correct world coordinates"""
+
+        # 1. Compute the Inverse Matrix
+        H_inv = np.linalg.inv(self.H)
+        
+        # 2. Prepare the warped point in homogeneous coordinates
+        point = np.array([u_warped, v_warped, 1.0]).reshape(3, 1)
+        
+        # 3. Transform back to raw pixel space
+        raw_pt_h = H_inv @ point
+        
+        # 4. Perspective division (normalize the coordinates)
+        u_raw = raw_pt_h[0] / raw_pt_h[2]
+        v_raw = raw_pt_h[1] / raw_pt_h[2]
+        
+        return [u_raw, v_raw]
+
+
+    def world_to_warped_pixel(self, x_world, y_world):
+        # Mapping World X [-500, 500] to Pixel [50, 1050]
+        px = (x_world + 500) + 50
+        
+        # Mapping World Y [475, -175] to Pixel [50, 700]
+        # (Top of board is 475, bottom is -175)
+        py = (475 - y_world) + 50
+        
+        return px, py
+    
+
+    def world_to_pixel(self, world_x, world_y, world_z=0):
+        """
+        convert world to pixel (u,v)
+        """
+
+        if self.extrinsic_matrix is None:
+            return
+        # 1. Create the 3D point in homogeneous coordinates [X, Y, Z, 1]
+        world_point = np.array([[world_x], [world_y], [world_z], [1.0]])
+
+        # 2. Apply Extrinsic Matrix (World -> Camera Space)
+        # This accounts for the camera's exact rotation and position in the room
+        camera_point = np.dot(self.extrinsic_matrix, world_point)
+
+        # 3. Apply Intrinsic Matrix (Camera Space -> Image Plane)
+        # We only use the [X, Y, Z] from the camera point (first 3 rows)
+        pixel_homogeneous = np.dot(self.intrinsic_matrix, camera_point[:3])
+
+        # 4. Perspective Division
+        # This is critical: Z is the depth of the point relative to the camera lens.
+        # Dividing by Z is what creates the perspective effect (further away = smaller).
+        z_c = pixel_homogeneous[2, 0]
+        
+        if abs(z_c) < 1e-6:
+            return None # Point is at or behind the camera lens
+        
+        u = pixel_homogeneous[0, 0] / z_c
+        v = pixel_homogeneous[1, 0] / z_c
+
+        return (int(round(u)), int(round(v)))
+    
 
     def processVideoFrame(self):
         """!
@@ -444,6 +534,7 @@ class Camera():
         if (self.extrinsic_matrix is None):
             return
         
+        
         modified_image = self.VideoFrame.copy()
         # Write your code here
         # Extract X and Y coordinates from the meshgrid
@@ -452,7 +543,6 @@ class Camera():
         Y_flat = Y.flatten()
 
 
-  
         
         # Assume Z is 0 (grid is flat on the board frame)
         Z_flat = np.zeros_like(X_flat)
@@ -482,18 +572,29 @@ class Camera():
         u = pixels_homogenous[0, :] / safe_z
         v = pixels_homogenous[1, :] / safe_z
 
-        for i in range(len(u)):
-            # 4. Skip drawing any points that are behind or inside the camera
-            # if z_values[i] <= 0.0:
-            #     continue
+        if self.homography:
+            # Prepare points for cv2: shape (N, 1, 2)
+            pts_to_warp = np.array([u, v]).T.reshape(-1, 1, 2).astype(np.float32)
+            # This moves the dots into the Top-Down view
+            warped_pts = cv2.perspectiveTransform(pts_to_warp, self.H)
+            # Now we loop through the warped points specifically
+            for i in range(len(warped_pts)):
+                # Extract px, py from the warped result
+                px, py = warped_pts[i][0]
                 
-            px, py = int(u[i]), int(v[i])
+                # Draw on the warped image
+                cv2.circle(modified_image, (int(px), int(py)), 4, (0, 255, 0), -1)
+        else:
+            # Fallback: Draw on the normal tilted frame
+            for i in range(len(u)):
+                px, py = int(u[i]), int(v[i])
+                cv2.circle(modified_image, (px, py), 4, (0, 255, 0), -1)
             
             # # Make sure you use the updated bounds from earlier!
             # if -450 <= px <= 500 and -175 <= py <= 525:
             cv2.circle(modified_image, (px, py), 4, (0, 255, 0), -1)
 
-        # modified_image = self.Homography_Transform(modified_image)
+       # modified_image = self.Homography_Transform(modified_image)
         self.GridFrame = modified_image
 
 
@@ -538,64 +639,6 @@ class Camera():
 
 
 
-    # def projectGridInRGBImage(self):
-    #     if (self.extrinsic_matrix is None):
-    #         return
-        
-    #     modified_image = self.VideoFrame.copy()
-
-    #     # 1. Define the 4 Tag Corners in REAL WORLD coordinates (mm)
-    #     # Order: Tag 4 (TL), Tag 3 (TR), Tag 1 (BL), Tag 2 (BR)
-    #     world_corners = np.array([
-    #         [-500,  475, 0, 1],  # Tag 4
-    #         [ 500,  475, 0, 1],  # Tag 3
-    #         [-500, -175,  0, 1],  # Tag 1
-    #         [ 500, -175,  0, 1]   # Tag 2
-    #     ]).T # Transpose to (4, 4) for matrix math
-
-    #     # 2. Project World -> Camera Frame -> Pixel Space
-    #     # This uses the current extrinsic_matrix, so it updates as the camera moves!
-    #     cam_corners = self.extrinsic_matrix @ world_corners
-    #     pixel_corners_h = self.intrinsic_matrix @ cam_corners[0:3, :]
-        
-    #     # 3. Divide by Z to get final (u, v) pixels
-    #     # Using a small epsilon to prevent division by zero
-    #     z_coords = np.maximum(pixel_corners_h[2, :], 1e-5)
-    #     u_corners = pixel_corners_h[0, :] / z_coords
-    #     v_corners = pixel_corners_h[1, :] / z_coords
-
-    #     # 4. Save these as your src_pts for Homography
-    #     # We stack them into a (4, 2) array of float32
-    #     self.current_src_pts = np.vstack((u_corners, v_corners)).T.astype(np.float32)
-
-
-    #     X, Y = self.grid_points
-    #     X_flat, Y_flat = X.flatten(), Y.flatten()
-    #     world_pts = np.vstack((X_flat, Y_flat, np.zeros_like(X_flat), np.ones_like(X_flat)))
-        
-    #     cam_pts = self.extrinsic_matrix @ world_pts 
-    #     pixels_homog = self.intrinsic_matrix @ cam_pts[0:3, :]
-        
-    #     u = pixels_homog[0, :] / np.maximum(pixels_homog[2, :], 1e-5)
-    #     v = pixels_homog[1, :] / np.maximum(pixels_homog[2, :], 1e-5)
-        
-
-    #     for i in range(len(u)):
-    #         # 4. Skip drawing any points that are behind or inside the camera
-    #         # if z_values[i] <= 0.0:
-    #         #     continue
-                
-    #         px, py = int(u[i]), int(v[i])
-            
-    #         # # Make sure you use the updated bounds from earlier!
-    #         # if -450 <= px <= 500 and -175 <= py <= 525:
-    #         cv2.circle(modified_image, (px, py), 4, (0, 255, 0), -1)
-
-        
-    #     # 5. Pass the image to the transform
-    #     # Make sure your Homography_Transform uses self.current_src_pts!
-    #     self.GridFrame = self.Homography_Transform(modified_image)
-
 
     def coord_pixel_to_world(self, u, v, d):
         '''
@@ -604,22 +647,39 @@ class Camera():
         v: pixel y coordinate
         depth: depth value at pixel (u, v) # TODO: find its units
         '''
+        if self.extrinsic_matrix is None:
+            print("extrinsic matrix is undefined")
+            return
+        
+        if (self.max_depth is None):
+            return
+        
+        if d > self.max_depth:
+            z = 0   # z must be positive
+        else:
+            z = self.max_depth - d
+ 
+        print("original z from depth frame: ", z)
+
+        offset = 10
+        roi = self.DepthFrameRaw[v-offset:v+offset, u-offset:u+offset]
+        valid_depths = roi[(roi > 0)]
+        min_depth = np.min(valid_depths)
+        min_depth = np.percentile(valid_depths, 5)
+        d= min_depth
+
+        z = self.max_depth - min_depth
+        print(f"min z around the pixel: {z}")
+        
         index = np.array([u, v, 1]).reshape((3,1))
         pos_camera = d * np.matmul(self.intrinsic_matrix_inv, index)
         temp_pos = np.array([pos_camera[0][0], pos_camera[1][0], pos_camera[2][0], 1]).reshape((4,1))
         extrinsic_matrix_inv = np.linalg.inv(self.extrinsic_matrix)
         world_pos = np.matmul(extrinsic_matrix_inv, temp_pos)
-        if (self.max_depth is None):
-            return
-        z = self.max_depth - d
-        if (z < 0):
-            z = 0
+
         pos = world_pos.flatten()[:3]
-        print(f"worldX: {pos[0]}, worldY: {pos[1]}, worldZ: {pos[2]}")     
+       # print(f"worldX: {pos[0]}, worldY: {pos[1]}, worldZ: {pos[2]}")     
 
-        pos[2] = z
-
-        print(f"z: {z}")
         return pos
 
     
@@ -650,57 +710,15 @@ class Camera():
         
         # 5. Plug the scale factor back in to get the exact X and Y world coordinates
         world_point = t_inv + (scale_factor * world_ray)
-        if self.max_depth is None:
-            return
-        z = self.max_depth -d # subtract from maximum depth ~990 to get z=0 at ground level
-
-        if (z <0):  # z must be positive
-            z = 0
-
-        print(f"z of the pixel: {z}")
-
-        world_x = world_point[0,0]
-        world_y = world_point[1,0]
-
 
         
-        # get the pixel coordinates of April Tag
-        bounding_region = np.array([
-            [world_x - 10,  world_y, 0, 1],  
-            [ world_x,  world_y+10, 0, 1],  
-            [world_x + 10, world_y,  0, 1],
-            [world_x, world_y -10,  0, 1]   
-        ]).T # Transpose to (4, 4) for matrix math
+        # use the camera pinhole model to get height z
+        pos = self.coord_pixel_to_world(u, v, d)
+        world_point[2,0] = pos[2]
+    
+        print(f"worldX: {world_point[0, 0]}, worldY: {world_point[1, 0]}, worldZ: {world_point[2,0]}") 
 
-        # 2. Project World -> Camera Frame -> Pixel Space
-        # This uses the current extrinsic_matrix, so it updates as the camera moves!
-        bounding_corners = self.extrinsic_matrix @ bounding_region
-        pixel_corners_h = self.intrinsic_matrix @ bounding_corners[0:3, :]
-        
-        # 3. Divide by Z to get final (u, v) pixels
-        # Using a small epsilon to prevent division by zero
-        z_coords = np.maximum(bounding_corners[2, :], 1e-5)
-        u_corners = pixel_corners_h[0, :] / z_coords
-        v_corners = pixel_corners_h[1, :] / z_coords
-
-        # 4. Save these as your src_pts for Homography
-        # We stack them into a (4, 2) array of float32
-        bounding_pixels = np.vstack((u_corners, v_corners)).T.astype(np.float32)
-        min_depth =z
-        for pt in bounding_pixels:
-            u,v = pt
-            u_int = int(u)
-            v_int = int(v)
-            if (self.DepthFrameRaw[v_int][u_int] < min_depth):
-                min_depth = self.DepthFrameRaw[v_int][u_int]
-        
-        z= min_depth
-            
-        print(f"min z around the pixel: {z}")
-
-        print(f"worldX: {world_point[0, 0]}, worldY: {world_point[1, 0]}, worldZ: {world_point[2,0]}")     
-
-        return [world_point[0, 0], world_point[1, 0], z] # invert y axis to align with motor direction
+        return [world_point[0, 0], world_point[1, 0], world_point[2,0]] # invert y axis to align with motor direction
 
 
 
@@ -708,8 +726,8 @@ class Camera():
         """ Solve extrinsic matrix using detected board tags and their world coordinates
         Origin (0,0) is at the robot's position. Use boardTag_center for the position of April tags"""
 
-        if self.tag_detections is None or not hasattr(self.tag_detections, 'detections'):
-            return
+        # if self.tag_detections is None or not hasattr(self.tag_detections, 'detections'):
+        #     return
         if self.intrinsic_matrix is None:
             return
 
@@ -718,7 +736,7 @@ class Camera():
         img_points_list = []
 
         # detect all four board tags
-        for detection in self.tag_detections.detections:
+        for detection in self.tag_detections:
             tag_id = detection.id
             if tag_id in self.boardTag_center:
                 x,y,z = self.boardTag_center[tag_id]
@@ -755,6 +773,7 @@ class Camera():
             
             self.extrinsic_matrix = extrinsic_matrix
             self.camera_calibrated = True   # both intrinsic and extrinsic calibration completed
+            print("extrinsic matrix solved successfully:")
             try:
                 # debug_img = self.VideoFrame.copy()
                 # window_name = f"Debug_Tag_{tag_id}"
@@ -896,7 +915,9 @@ class ImageListener(Node):
             cv_image = self.bridge.imgmsg_to_cv2(data, data.encoding)
         except CvBridgeError as e:
             print(e)
-        self.camera.VideoFrame = cv_image
+
+        self.camera.VideoFrame = self.camera.Homography_Transform(cv_image)
+        #self.camera.VideoFrame = cv_image
 
 
 class TagDetectionListener(Node):
@@ -917,14 +938,18 @@ class TagDetectionListener(Node):
         #     self.camera.solve_extrinsic()  
     
         if np.any(self.camera.VideoFrame != 0):
-            self.camera.tag_detections = msg
+            if hasattr(msg, 'detections'):
+                self.camera.tag_detections = msg.detections
+
+                if self.camera.extrinsic_matrix is None: 
+                    self.camera.solve_extrinsic()
+
             self.camera.drawTagsInRGBImage(msg)
             #self.camera.compareContours(msg)
         #    self.camera.detectBlocksInDepthImage(msg)
 
 
-            if self.camera.extrinsic_matrix is None: 
-                self.camera.solve_extrinsic()
+
 
 
 
@@ -955,6 +980,8 @@ class DepthListener(Node):
             # cv_depth = cv2.rotate(cv_depth, cv2.ROTATE_180)
         except CvBridgeError as e:
             print(e)
+        # CASTROPHIC TO APPLY HOMOGRAPHY ON DEPTH FRAME
+        #self.camera.DepthFrameRaw = self.camera.Homography_Transform(cv_depth)
         self.camera.DepthFrameRaw = cv_depth
         if (self.camera.max_depth is None):
             self.camera.get_maxDepth()
