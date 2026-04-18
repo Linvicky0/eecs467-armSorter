@@ -420,6 +420,7 @@ class InterbotixArmXSInterface:
             until the robot finishes moving
         """
         self.core.get_node().logdebug('Going to home pose')
+        print(f"home pos angles: {[0] * self.group_info.num_joints}")
         self._publish_commands(
             positions=[0] * self.group_info.num_joints,
             moving_time=moving_time,
@@ -442,6 +443,8 @@ class InterbotixArmXSInterface:
         :param blocking: (optional) whether the function should wait to return control to the user
             until the robot finishes moving
         """
+        print(f"Their sleep joint angles:{self.group_info.joint_sleep_positions}")
+
         self.core.get_node().logdebug('Going to sleep pose')
         self._publish_commands(
             positions=self.group_info.joint_sleep_positions,
@@ -759,6 +762,19 @@ class InterbotixArmXSInterface:
         ]
         return mr.FKinSpace(self.robot_des.M, self.robot_des.Slist, joint_states)
 
+
+    def get_ee_angles(self):
+        T = self.get_ee_pose()
+
+        # Extract the rotation components
+        r31 = T[2, 0]
+        r33 = T[2, 2]
+
+        # Phi is the global pitch of the end effector
+        phi = np.arctan2(-r31, r33)
+        return phi
+
+
     def capture_joint_positions(self) -> None:
         """
         Reset self.joint_commands to be the actual positions seen by the encoders.
@@ -781,6 +797,9 @@ class InterbotixArmXSInterface:
         :return: list of joint positions [rad]
         """
         self.core.get_node().logdebug('Getting joint states')
+        for name in self.group_info.joint_names:
+            print(f"joint names: {name}, position {self.core.joint_states.position[self.core.js_index_map[name]]}")
+
         with self.core.js_mutex:
             return [
                 self.core.joint_states.position[self.core.js_index_map[name]]

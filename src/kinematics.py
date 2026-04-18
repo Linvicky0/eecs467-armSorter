@@ -179,11 +179,11 @@ def IK_geometric(pose, dh_params = None, block_ori = None):
     # POTENTIAL TODO: theta1, theta3, and theta4's polarity might need to be reversed to match motor config
 
     # IK for 5DOF 3-linked arm, with 360 rotating base and end effector
-    xc,yc,zc, final_theta = pose[0:3]
+    xc,yc,zc = pose[0:3]
 
-    R = np.array([cos(final_theta), -sin(final_theta), 0],
-                 [sin(final_theta), cos(final_theta), 0],
-                 0, 0, 1)
+    # R = np.array([cos(final_theta), -sin(final_theta), 0],
+    #              [sin(final_theta), cos(final_theta), 0],
+    #              0, 0, 1)
     
     zc = zc - l4
 
@@ -205,7 +205,7 @@ def IK_geometric(pose, dh_params = None, block_ori = None):
     theta3 = -theta3
     theta2 = np.pi/2 - t_offset - theta2 # offset
 
-    theta4 = final_theta- (theta2 + theta3)
+    theta4 = phi- (theta2 + theta3)
 
     # Set wrist rotation based on block orientation
     if block_ori is None:

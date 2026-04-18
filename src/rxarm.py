@@ -130,9 +130,11 @@ class RXArm(InterbotixManipulatorXS):
         self.arm.go_to_home_pose(moving_time=self.moving_time,
                              accel_time=self.accel_time,
                              blocking=True)
+
         self.arm.go_to_sleep_pose(moving_time=self.moving_time,
                               accel_time=self.accel_time,
                               blocking=False)
+
         self.initialized = False
 
     def set_positions(self, joint_positions):
@@ -195,11 +197,14 @@ class RXArm(InterbotixManipulatorXS):
 
         @return     The EE pose as [x, y, z, phi, theta, psi]
         """
-
+      #  return self.arm.get_ee_angles()
         # TODO: Change the following function to FK_pox if you're using PoX
         ee_T = FK_dh(self.dh_params, self.get_positions(), self.num_joints)
         ee_pose = get_pose_from_T(ee_T)
         return ee_pose
+    
+    def get_ee_angles(self):
+        return self.arm.get_ee_angles()
 
     def get_dh_parameters(self):
         """!
