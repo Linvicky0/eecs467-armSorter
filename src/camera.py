@@ -20,6 +20,9 @@ from cv_bridge import CvBridge, CvBridgeError
 import os
 import sys
 from pathlib import Path
+import pyrealsense2 as rs
+import scipy.ndimage as ndimage
+import math
 
 
 import yaml
@@ -75,6 +78,7 @@ class Camera():
             'all_contours': [],
             'has_cluster': False
         }
+        self.blocksize = 40     # for rounding measured height of block
 
         # April tag IDS and positions for building the board
         self.boardTag_center =  {  
@@ -135,7 +139,22 @@ class Camera():
         dest_arr = np.array(dest_pts_list, dtype=DTYPE)
 
         H,_ = cv2.findHomography(src_arr, dest_arr)
+
+        # write to file
+        home_dir = str(Path.home())
+        save_dir = os.path.join(home_dir, "robot_data")
+        h_path = os.path.join(save_dir, "homography_matrix.txt")
+
+        # base_path = os.path.dirname(os.path.abspath(__file__))
+        # file_path = os.path.join(base_path, "extrinsic_matrix.txt")
+        
+        with open(h_path, "w") as f:
+            f.write("Homography Matrix:\n")
+            matrix_str = np.array2string(H, precision=4, suppress_small=True)
+            f.write(matrix_str)
         self.H = H
+       # new_img = cv2.warpPerspective(image, H, (1100, image.shape[0]))
+
         new_img = cv2.warpPerspective(image, H, (image.shape[1], image.shape[0]))
         self.homography = True
         return new_img
@@ -157,7 +176,7 @@ class Camera():
         u_raw = raw_pt_h[0] / raw_pt_h[2]
         v_raw = raw_pt_h[1] / raw_pt_h[2]
         
-        return [u_raw, v_raw]
+        return [float(u_raw), float(v_raw)]
 
 
     def world_to_warped_pixel(self, x_world, y_world):
@@ -169,7 +188,10 @@ class Camera():
         py = (475 - y_world) + 50
         
         return px, py
-    
+
+    def round_to_blocksize(self, height):
+        return round(height/self.blocksize)*self.blocksize
+
 
     def world_to_pixel(self, world_x, world_y, world_z=0):
         """
@@ -594,7 +616,6 @@ class Camera():
             # if -450 <= px <= 500 and -175 <= py <= 525:
             cv2.circle(modified_image, (px, py), 4, (0, 255, 0), -1)
 
-       # modified_image = self.Homography_Transform(modified_image)
         self.GridFrame = modified_image
 
 
@@ -661,9 +682,19 @@ class Camera():
  
         print("original z from depth frame: ", z)
 
-        offset = 10
+        index = np.array([u, v, 1]).reshape((3,1))
+        pos_camera = d * np.matmul(self.intrinsic_matrix_inv, index)
+        temp_pos = np.array([pos_camera[0][0], pos_camera[1][0], pos_camera[2][0], 1]).reshape((4,1))
+        extrinsic_matrix_inv = np.linalg.inv(self.extrinsic_matrix)
+        world_pos = np.matmul(extrinsic_matrix_inv, temp_pos)
+    
+        pos = world_pos.flatten()[:3]
+        print(f"original height z: {pos[2]}")
+
+        offset = 15
         roi = self.DepthFrameRaw[v-offset:v+offset, u-offset:u+offset]
-        valid_depths = roi[(roi > 0)]
+        smoothed_roi = ndimage.median_filter(roi, size=3)
+        valid_depths = smoothed_roi[(smoothed_roi > 0)]
         min_depth = np.min(valid_depths)
         min_depth = np.percentile(valid_depths, 5)
         d= min_depth
@@ -678,6 +709,7 @@ class Camera():
         world_pos = np.matmul(extrinsic_matrix_inv, temp_pos)
 
         pos = world_pos.flatten()[:3]
+        pos[2] = self.round_to_blocksize(pos[2])
        # print(f"worldX: {pos[0]}, worldY: {pos[1]}, worldZ: {pos[2]}")     
 
         return pos
@@ -917,7 +949,7 @@ class ImageListener(Node):
             print(e)
 
         self.camera.VideoFrame = self.camera.Homography_Transform(cv_image)
-        #self.camera.VideoFrame = cv_image
+      #  self.camera.VideoFrame = cv_image
 
 
 class TagDetectionListener(Node):
@@ -1012,6 +1044,15 @@ class VideoThread(QThread):
         self.executor.add_node(depth_listener)
         self.executor.add_node(camera_info_listener)
         self.executor.add_node(tag_detection_listener)
+
+        # pipeline = rs.pipeline()
+        # config = rs.config()
+        # config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+        # config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+        # pipeline.start(config)
+
+        # align_to = rs.stream.color
+        # align = rs.align(align_to)
 
     def run(self):
         if __name__ == '__main__':

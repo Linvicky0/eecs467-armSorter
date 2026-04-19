@@ -9,6 +9,7 @@ from kinematics import IK_geometric
 import copy
 import math 
 import cv2
+from kinematics import clamp
 
 
 class StateMachine():
@@ -245,6 +246,7 @@ class StateMachine():
 
 
         self.camera.pixel_to_World(pt[0], pt[1],d) # more accurate
+        
         #self.camera.coord_pixel_to_world(pt[0], pt[1], d)
         # if self.rxarm.estop:
         #     self.next_state = "estop"
@@ -308,7 +310,7 @@ class StateMachine():
         ############ Planning #############
         # print("[PICK] Planning waypoints...")
         pick_stable = True
-        pick_height_offset = 200    
+        pick_height_offset = 100    
         target_world_pos[2] = target_world_pos[2]  + pick_height_offset
 
        # reachable_low, reachable_high = False, False
@@ -324,16 +326,21 @@ class StateMachine():
                                                                               execute = True)
     
         # EE descends to grab the object
-        descend_offset = (-pick_height_offset+15)/1000  
+        descend_offset = (-pick_height_offset+10)/1000  
         print(f"descending angles: {joint_angles_2} ")
         print("EE descending")        
         move_time, ac_time = self.calMoveTime(joint_angles_2)
 
         # TODO: orient the wrist to align with object orientation before grasping
         phi = self.rxarm.get_ee_angles()
-        print(f"phi {phi}")
-        joint_angles_2[-1] = -joint_angles_2[0] # parallel to x axis
-        self.rxarm.arm._publish_commands(joint_angles_2, 2, 0, True)
+        print(f"before EE phi {phi}")
+        joint_angles_2[-1] = clamp(-joint_angles_2[0]) # parallel to x axis
+
+       # self.rxarm.arm._publish_commands(joint_angles_2, moving_time=2, accel_time=0, blocking=True)
+        self.rxarm.arm.set_single_joint_position("wrist_rotate", -phi, moving_time=2, accel_time=0, blocking=True)
+
+        phi = self.rxarm.get_ee_angles()
+        print(f"after EE phi {phi}")
 
         joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
                                                                               y=-target_world_pos[0]/1000, # motor's x axis is flipped
@@ -343,7 +350,6 @@ class StateMachine():
                                                                               execute = True)
 
 
-      #  self.rxarm.arm.set_single_joint_position("wrist_rotate", -0.7, moving_time=2, accel_time=0, blocking=True)
 
 
         self.rxarm.gripper_grasp()
