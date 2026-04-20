@@ -763,16 +763,10 @@ class InterbotixArmXSInterface:
         return mr.FKinSpace(self.robot_des.M, self.robot_des.Slist, joint_states)
 
 
-    def get_ee_angles(self):
-        T = self.get_ee_pose()
+    def check_obstacle(self, joint_angles):
+        T = mr.FKinSpace(self.robot_des.M, self.robot_des.Slist, joint_angles)
 
-        # Extract the rotation components
-        r31 = T[2, 0]
-        r33 = T[2, 2]
-
-        # Phi is the global pitch of the end effector
-        phi = np.arctan2(-r31, r33)
-        return phi
+        # TODO: compute Fk for all joints to get arm's pose
 
 
     def capture_joint_positions(self) -> None:

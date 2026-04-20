@@ -91,6 +91,7 @@ class Camera():
         # homography transformation variables
         self.homography = False
         self.H = None
+        self.H_inv = None
 
         # maximum depth from camera to board, used for calculating z
         self.max_depth = None
@@ -153,6 +154,8 @@ class Camera():
             matrix_str = np.array2string(H, precision=4, suppress_small=True)
             f.write(matrix_str)
         self.H = H
+        self.H_inv = np.linalg.inv(H)
+
        # new_img = cv2.warpPerspective(image, H, (1100, image.shape[0]))
 
         new_img = cv2.warpPerspective(image, H, (image.shape[1], image.shape[0]))
@@ -164,13 +167,12 @@ class Camera():
         """undo homography transformation to convert the pixel coordiantes to correct world coordinates"""
 
         # 1. Compute the Inverse Matrix
-        H_inv = np.linalg.inv(self.H)
         
         # 2. Prepare the warped point in homogeneous coordinates
         point = np.array([u_warped, v_warped, 1.0]).reshape(3, 1)
         
         # 3. Transform back to raw pixel space
-        raw_pt_h = H_inv @ point
+        raw_pt_h = self.H_inv @ point
         
         # 4. Perspective division (normalize the coordinates)
         u_raw = raw_pt_h[0] / raw_pt_h[2]
