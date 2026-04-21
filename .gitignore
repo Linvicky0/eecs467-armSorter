@@ -12,3 +12,4 @@ labelStudio.py
 src/calibration_data/
 src/calibration_data/*.png
 src/calibrationdata.tar.gz
+**.cache

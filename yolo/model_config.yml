@@ -1,4 +1,4 @@
-path: /yolo_seg/yolo/data
+path: /home/eecs467-student/eecs467-armSorter/yolo/data
 train: images/train
 val: images/val
 

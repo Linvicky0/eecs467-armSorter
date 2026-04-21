@@ -21,9 +21,17 @@ import os
 import sys
 from pathlib import Path
 import pyrealsense2 as rs
-import scipy.ndimage as ndimage
+# import scipy.ndimage as ndimage
 import math
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+yolo_src_path = os.path.abspath(os.path.join(current_dir, '..', 'yolo', 'src'))
+
+if yolo_src_path not in sys.path:
+    sys.path.append(yolo_src_path)
+
+from model import *
 
 import yaml
 DTYPE = np.float64
@@ -695,8 +703,8 @@ class Camera():
 
         offset = 15
         roi = self.DepthFrameRaw[v-offset:v+offset, u-offset:u+offset]
-        smoothed_roi = ndimage.median_filter(roi, size=3)
-        valid_depths = smoothed_roi[(smoothed_roi > 0)]
+        # smoothed_roi = ndimage.median_filter(roi, size=3)
+        valid_depths = roi[(roi > 0)]
         min_depth = np.min(valid_depths)
         min_depth = np.percentile(valid_depths, 5)
         d= min_depth
@@ -1116,4 +1124,9 @@ def main(args=None):
 
 
 if __name__ == '__main__':
+    # res = run_model()
+    # metrics = eval_model()
+    # print(res)
+    # print(metrics.box.map)
+    
     main()
