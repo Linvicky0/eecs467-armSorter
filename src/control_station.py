@@ -314,8 +314,13 @@ class Gui(QMainWindow):
         """
         """ Get mouse posiiton """
         pt = mouse_event.pos()
-        self.camera.last_click[0] = pt.x()
-        self.camera.last_click[1] = pt.y()
+        if self.camera.homography:
+            pt = self.camera.undo_homography(pt.x(), pt.y())
+            self.camera.last_click[0] = pt[0]
+            self.camera.last_click[1] = pt[1]
+        else:
+            self.camera.last_click[0] = pt.x()
+            self.camera.last_click[1] = pt.y()
         self.camera.new_click = True
 
     def initRxarm(self):

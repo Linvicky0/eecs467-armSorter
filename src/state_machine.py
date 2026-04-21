@@ -9,6 +9,8 @@ from kinematics import IK_geometric
 import copy
 import math 
 import cv2
+from kinematics import clamp
+import modern_robotics as mr
 
 
 class StateMachine():
@@ -237,14 +239,15 @@ class StateMachine():
 
         self.camera.new_click = False
         pt = self.camera.last_click
+
         d = self.camera.DepthFrameRaw[pt[1]][pt[0]]
         print(f"pixelX: {pt[0]}, pixelY: {pt[1]}, depth: {d}")
         self.rxarm.arm.get_joint_positions()
-        print(f"EE angle: {self.rxarm.get_ee_angles()}")
 
 
         self.camera.pixel_to_World(pt[0], pt[1],d) # more accurate
-        # self.camera.coord_pixel_to_world(pt[0], pt[1], z)
+        
+        #self.camera.coord_pixel_to_world(pt[0], pt[1], d)
         # if self.rxarm.estop:
         #     self.next_state = "estop"
 
@@ -288,8 +291,6 @@ class StateMachine():
 
     def auto_pick(self, _target_world_pos, block_ori, phi=np.pi/2, double_check=False, to_sky=False):
 
-        # phi = self.rxarm.get_ee_angles()
-        # print(f"phi {phi}")
         
         target_world_pos = copy.deepcopy(_target_world_pos)
         above_world_pos = copy.deepcopy(_target_world_pos)
@@ -307,43 +308,113 @@ class StateMachine():
         ############ Planning #############
         # print("[PICK] Planning waypoints...")
         pick_stable = True
-        pick_height_offset = 200    
+
+        # determine if final pose is reachable, exit if not
+        current_joints = self.rxarm.arm.get_joint_commands()
+
+
+        
+        joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
+                                                                            y=-target_world_pos[0]/1000, # motor's x axis is flipped
+                                                                            z=((target_world_pos[2]/1000)), # position converted to meters
+                                                                            pitch = phi,
+                                                                            moving_time = 4,
+                                                                            execute = False)
+        
+        pick_height_offset = 0
+        if target_world_pos[2] > 100:
+            pick_height_offset = 40  # smaller height offset in case the goal becomes unreachable
+        else:
+            pick_height_offset = 100    
+
         target_world_pos[2] = target_world_pos[2]  + pick_height_offset
+
+
+
+        
+        
+        if not reachable_low:
+            print("final EE pose is not reachable")
+            return
+
+
+
+
+
+        # Define how long the move takes and how many waypoints to check
+        time_in_seconds = 4.0
+        number_of_waypoints = 100 # Higher number = finer resolution for obstacle checking
+
+        #  generates a path to final destination
+        trajectory = mr.JointTrajectory(current_joints, joint_angles_2, time_in_seconds, number_of_waypoints, 3)
+
+        
 
        # reachable_low, reachable_high = False, False
 
         # Try vertical reach with phi = pi/2
         # this function computes the path to get to the final EE and execute it if its valid
-        joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
-                                                                              y=-target_world_pos[0]/1000, # motor's x axis is flipped
-                                                                              z=target_world_pos[2]/1000, # position converted to meters
-                                                                              pitch = phi,
-                                                                              moving_time =2,
-                                                                              blocking= True,
-                                                                              execute = True)
+        # joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
+        #                                                                       y=-target_world_pos[0]/1000, # motor's x axis is flipped
+        #                                                                       z=(target_world_pos[2])/1000, # position converted to meters
+        #                                                                       pitch = phi,
+        #                                                                       moving_time =2,
+        #                                                                       blocking= True,
+        #                                                                       execute = True)
     
+        for angles in trajectory:
+            self.rxarm.set_positions(angles)
+            
+
+        # TODO: inside this function, check if there's obstacles. if so, don't execute the motor command
+        # success = self.rxarm.arm.set_ee_cartesian_trajectory(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
+        #                                             y=-target_world_pos[0]/1000, # motor's x axis is flipped
+        #                                             z=(target_world_pos[2])/1000, # position converted to meters
+        #                                             pitch = phi,
+        #                                             moving_time =2)
+
+        # if success is False:
+        #     print("path to goal failed in autopick")
+        #     return
+        
+
         # EE descends to grab the object
-        descend_offset = (-pick_height_offset+15)/1000  
-        print(f"descending angles: {joint_angles_2} ")
+        descend_offset = (-pick_height_offset)/1000  
         print("EE descending")        
-        move_time, ac_time = self.calMoveTime(joint_angles_2)
 
         # TODO: orient the wrist to align with object orientation before grasping
-        phi = self.rxarm.get_ee_angles()
-        print(f"phi {phi}")
-        joint_angles_2[-1] = -joint_angles_2[0] # parallel to x axis
-        self.rxarm.arm._publish_commands(joint_angles_2, 2, 0, True)
+        joint_angles_2, valid = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
+                                                                            y=-target_world_pos[0]/1000, # motor's x axis is flipped
+                                                                            z=((target_world_pos[2]/1000)), # position converted to meters
+                                                                            pitch = phi,
+                                                                            moving_time = 4,
+                                                                            execute = False)
+        if valid is False:
+            print("failed to descend arm")
+            return
+        
+        print(f"joint angles from path: {joint_angles_2}")
+     
+        joint_angles_2[-1] = joint_angles_2[0] # parallel to x axis
+        print(f"joint angle base: {joint_angles_2[0]}")
 
+
+
+        # orient the wrist before descend
+        self.rxarm.arm._publish_commands(joint_angles_2, moving_time=2, accel_time=0, blocking=True)
+
+
+        #TODO: check for obstacle before descending
+        # maintain the orientation while descending
+
+        
         joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
                                                                               y=-target_world_pos[0]/1000, # motor's x axis is flipped
                                                                               z=((target_world_pos[2]/1000)+descend_offset), # position converted to meters
                                                                               pitch = phi,
+                                                                              roll = joint_angles_2[0],
                                                                               moving_time = 4,
                                                                               execute = True)
-
-
-      #  self.rxarm.arm.set_single_joint_position("wrist_rotate", -0.7, moving_time=2, accel_time=0, blocking=True)
-
 
         self.rxarm.gripper_grasp()
         return
