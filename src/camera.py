@@ -104,6 +104,34 @@ class Camera():
         # maximum depth from camera to board, used for calculating z
         self.max_depth = None
 
+        # bin configurataion 
+        self.bin_definitions = {
+            "bin1": {
+                "tag_ids": (5, 6),   
+                "length": 220.0,       # mm
+                "width": 150.0,        # mm
+                "buffer_pad_length": 25.0,
+                "buffer_pad_width": 10.0,
+                "drop_length": 175.0,
+                "drop_width": 100.0,
+                "drop_offset": [0.0, 0.0, 0.0],
+                "tag_to_bin_center": 110.0
+            },
+            "bin2": {
+                "tag_ids": (7, 8),   
+                "length": 220.0,
+                "width": 150.0,
+                "buffer_pad_length": 25.0,
+                "buffer_pad_width": 10.0,
+                "drop_length": 175.0,
+                "drop_width": 100.0,
+                "drop_offset": [0.0, 0.0, 0.0],
+                "tag_to_bin_center": 110.0
+            }
+        }
+        
+        # stores latest computed bin / buffer / drop regions
+        self.bin_rectangles = {}
 
 
 
@@ -944,6 +972,392 @@ class Camera():
         self.TagImageFrame = modified_image
         self.TagDepthFrame = depth_color  # Store the processed depth frame
 
+    def get_depth_at_pixel(self, u, v, window=7):
+        """
+        Robust depth estimate near a pixel using median of valid depths.
+        """
+        if self.DepthFrameRaw is None:
+            return None
+
+        h, w = self.DepthFrameRaw.shape[:2]
+        u = int(np.clip(u, 0, w - 1))
+        v = int(np.clip(v, 0, h - 1))
+
+        half = window // 2
+        u0 = max(0, u - half)
+        u1 = min(w, u + half + 1)
+        v0 = max(0, v - half)
+        v1 = min(h, v + half + 1)
+
+        roi = self.DepthFrameRaw[v0:v1, u0:u1]
+        valid = roi[roi > 0]
+
+        if valid.size == 0:
+            return None
+
+        return float(np.median(valid))
+
+
+    def get_tag_center_world(self, detection):
+        """
+        Convert the AprilTag center from image pixel coordinates to world coordinates.
+        """
+        cx = int(detection.centre.x)
+        cy = int(detection.centre.y)
+
+        d = self.get_depth_at_pixel(cx, cy, window=7)
+        if d is None:
+            return None
+
+        return self.pixel_to_World(cx, cy, d)
+
+
+    def get_tag_bottom_edge_world(self, detection):
+        """
+        Get the bottom edge of a visible tag in world coordinates.
+
+        Assumes AprilTag corners are ordered consistently as:
+            0 = top-left
+            1 = top-right
+            2 = bottom-right
+            3 = bottom-left
+
+        Then the bottom edge is corner 3 -> corner 2.
+
+        """
+        if not hasattr(detection, "corners") or len(detection.corners) < 4:
+            return None
+
+        c_bl = detection.corners[3]   # bottom-left
+        c_br = detection.corners[2]   # bottom-right
+
+        d_bl = self.get_depth_at_pixel(int(c_bl.x), int(c_bl.y), window=5)
+        d_br = self.get_depth_at_pixel(int(c_br.x), int(c_br.y), window=5)
+
+        if d_bl is None or d_br is None:
+            return None
+
+        p_bl = self.pixel_to_World(int(c_bl.x), int(c_bl.y), d_bl)
+        p_br = self.pixel_to_World(int(c_br.x), int(c_br.y), d_br)
+
+        if p_bl is None or p_br is None:
+            return None
+
+        return np.array(p_bl, dtype=float), np.array(p_br, dtype=float)
+
+
+    def build_oriented_rectangle(self, center_xy, theta, length, width, z=0.0):
+        """
+        Build the 4 world-coordinate corners of an oriented rectangle.
+        theta defines the local +x axis.
+        """
+        u = np.array([math.cos(theta), math.sin(theta)])      # local x-axis
+        v = np.array([-math.sin(theta), math.cos(theta)])     # local y-axis
+
+        half_L = 0.5 * length
+        half_W = 0.5 * width
+
+        c1_xy = center_xy - half_L * u - half_W * v
+        c2_xy = center_xy + half_L * u - half_W * v
+        c3_xy = center_xy + half_L * u + half_W * v
+        c4_xy = center_xy - half_L * u + half_W * v
+
+        return [
+            [c1_xy[0], c1_xy[1], z],
+            [c2_xy[0], c2_xy[1], z],
+            [c3_xy[0], c3_xy[1], z],
+            [c4_xy[0], c4_xy[1], z],
+        ]
+
+
+    def estimate_bin_pose_from_single_tag(self, detection, bin_config):
+        """
+        Estimate bin pose from one visible tag using the fact that
+        the bin always lies along the bottom border of the tag.
+
+        Returns:
+            {
+                "center_xy": ...,
+                "center_z": ...,
+                "theta": ...,
+                "source": "single_tag_bottom_edge"
+            }
+        """
+        tag_world = self.get_tag_center_world(detection)
+        if tag_world is None:
+            return None
+
+        bottom_edge = self.get_tag_bottom_edge_world(detection)
+        if bottom_edge is None:
+            return None
+
+        p_bl, p_br = bottom_edge
+
+        # bin width direction follows the tag bottom edge
+        edge_vec = p_br[:2] - p_bl[:2]
+        edge_norm = np.linalg.norm(edge_vec)
+        if edge_norm < 1e-6:
+            return None
+
+        width_dir = edge_vec / edge_norm
+
+        # normal candidates to the bottom edge
+        normal1 = np.array([-width_dir[1], width_dir[0]])
+        normal2 = -normal1
+
+        tag_center_xy = np.array(tag_world[:2], dtype=float)
+        edge_mid_xy = 0.5 * (p_bl[:2] + p_br[:2])
+
+        # choose the normal that points from the bottom edge toward the tag center
+        to_center = tag_center_xy - edge_mid_xy
+        if np.dot(normal1, to_center) > np.dot(normal2, to_center):
+            inward_normal = normal1
+        else:
+            inward_normal = normal2
+
+        offset = float(bin_config["tag_to_bin_center"])
+        center_xy = tag_center_xy + offset * inward_normal
+        center_z = float(tag_world[2])
+
+        # local +x axis points inward from tag toward bin center
+        theta = math.atan2(inward_normal[1], inward_normal[0])
+
+        return {
+            "center_xy": center_xy,
+            "center_z": center_z,
+            "theta": theta,
+            "source": "single_tag_bottom_edge"
+        }
+
+
+    def find_bin_rectangles_from_tags(self):
+        """
+        Compute bin, buffer, and drop zones.
+
+        Priority:
+          1) two visible tags
+          2) one visible tag using the bottom border of the tag
+        """
+        self.bin_rectangles = {}
+
+        if self.tag_detections is None:
+            return self.bin_rectangles
+
+        if self.extrinsic_matrix is None or self.intrinsic_matrix is None:
+            return self.bin_rectangles
+
+        tag_lookup = {det.id: det for det in self.tag_detections}
+
+        for bin_name, config in self.bin_definitions.items():
+            tag1_id, tag2_id = config["tag_ids"]
+            pose = None
+
+            # Case 1: both tags visible
+            if tag1_id in tag_lookup and tag2_id in tag_lookup:
+                p1 = self.get_tag_center_world(tag_lookup[tag1_id])
+                p2 = self.get_tag_center_world(tag_lookup[tag2_id])
+
+                if p1 is not None and p2 is not None:
+                    p1 = np.array(p1, dtype=float)
+                    p2 = np.array(p2, dtype=float)
+
+                    center_xy = 0.5 * (p1[:2] + p2[:2])
+                    center_z = 0.5 * (p1[2] + p2[2])
+
+                    axis_vec = p2[:2] - p1[:2]
+                    axis_norm = np.linalg.norm(axis_vec)
+
+                    if axis_norm >= 1e-6:
+                        theta = math.atan2(axis_vec[1], axis_vec[0])
+                        pose = {
+                            "center_xy": center_xy,
+                            "center_z": center_z,
+                            "theta": theta,
+                            "source": "two_tags"
+                        }
+
+            # Case 2: only one tag visible
+            if pose is None:
+                if tag1_id in tag_lookup:
+                    pose = self.estimate_bin_pose_from_single_tag(
+                        tag_lookup[tag1_id],
+                        config
+                    )
+                elif tag2_id in tag_lookup:
+                    pose = self.estimate_bin_pose_from_single_tag(
+                        tag_lookup[tag2_id],
+                        config
+                    )
+
+            if pose is None:
+                continue
+
+            center_xy = pose["center_xy"]
+            center_z = pose["center_z"]
+            theta = pose["theta"]
+
+            bin_length = float(config["length"])
+            bin_width = float(config["width"])
+
+            buffer_length = bin_length + 2.0 * float(config["buffer_pad_length"])
+            buffer_width = bin_width + 2.0 * float(config["buffer_pad_width"])
+
+            drop_length = float(config["drop_length"])
+            drop_width = float(config["drop_width"])
+
+            u = np.array([math.cos(theta), math.sin(theta)])
+            v = np.array([-math.sin(theta), math.cos(theta)])
+
+            dx, dy, dz = config["drop_offset"]
+            drop_center_xy = center_xy + dx * u + dy * v
+            drop_center_z = center_z + dz
+
+            bin_corners = self.build_oriented_rectangle(
+                center_xy, theta, bin_length, bin_width, center_z
+            )
+
+            buffer_corners = self.build_oriented_rectangle(
+                center_xy, theta, buffer_length, buffer_width, center_z
+            )
+
+            drop_corners = self.build_oriented_rectangle(
+                drop_center_xy, theta, drop_length, drop_width, drop_center_z
+            )
+
+            self.bin_rectangles[bin_name] = {
+                "tag_ids": (tag1_id, tag2_id),
+                "center": [center_xy[0], center_xy[1], center_z],
+                "theta": theta,
+                "source": pose["source"],
+                "bin": {
+                    "length": bin_length,
+                    "width": bin_width,
+                    "corners": bin_corners
+                },
+                "buffer": {
+                    "length": buffer_length,
+                    "width": buffer_width,
+                    "corners": buffer_corners
+                },
+                "drop": {
+                    "center": [drop_center_xy[0], drop_center_xy[1], drop_center_z],
+                    "length": drop_length,
+                    "width": drop_width,
+                    "corners": drop_corners
+                }
+            }
+
+        return self.bin_rectangles
+
+
+    def draw_zone_rectangle(self, image, corners_world, color, label=None):
+        """
+        Draw one world-frame rectangle on an image.
+        """
+        if image is None:
+            return image
+
+        pixel_pts = []
+
+        for corner in corners_world:
+            px = self.world_to_pixel(corner[0], corner[1], corner[2])
+            if px is not None:
+                pixel_pts.append(px)
+
+        if len(pixel_pts) == 4:
+            pts = np.array(pixel_pts, dtype=np.int32).reshape((-1, 1, 2))
+            cv2.polylines(image, [pts], True, color, 2)
+
+            if label is not None:
+                cx = int(np.mean([p[0] for p in pixel_pts]))
+                cy = int(np.mean([p[1] for p in pixel_pts]))
+                cv2.putText(image, label, (cx + 5, cy - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+        return image
+
+
+    def draw_bin_regions_on_image(self, image):
+        """
+        Draw bin, buffer, and drop regions on image.
+        """
+        if image is None:
+            return image
+
+        output = image.copy()
+
+        for bin_name, info in self.bin_rectangles.items():
+            output = self.draw_zone_rectangle(
+                output,
+                info["bin"]["corners"],
+                (0, 255, 0),
+                f"{bin_name}_bin"
+            )
+
+            output = self.draw_zone_rectangle(
+                output,
+                info["buffer"]["corners"],
+                (0, 255, 255),
+                f"{bin_name}_buffer"
+            )
+
+            output = self.draw_zone_rectangle(
+                output,
+                info["drop"]["corners"],
+                (255, 0, 0),
+                f"{bin_name}_drop"
+            )
+
+            center = info["center"]
+            center_px = self.world_to_pixel(center[0], center[1], center[2])
+            if center_px is not None:
+                cv2.circle(output, center_px, 5, (255, 255, 255), -1)
+                cv2.putText(output, info["source"], (center_px[0] + 8, center_px[1] + 18),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 2)
+
+        return output
+
+
+    def is_point_in_oriented_rectangle(self, point_xyz, center_xyz, theta, length, width):
+        """
+        Check whether a world point lies inside an oriented rectangle.
+        """
+        px, py = point_xyz[0], point_xyz[1]
+        cx, cy = center_xyz[0], center_xyz[1]
+
+        rel = np.array([px - cx, py - cy], dtype=float)
+
+        u = np.array([math.cos(theta), math.sin(theta)])
+        v = np.array([-math.sin(theta), math.cos(theta)])
+
+        proj_u = np.dot(rel, u)
+        proj_v = np.dot(rel, v)
+
+        return (abs(proj_u) <= length / 2.0) and (abs(proj_v) <= width / 2.0)
+
+
+    def point_in_bin_region(self, point_xyz, bin_name, region="bin"):
+        """
+        region can be 'bin', 'buffer', or 'drop'
+        """
+        if bin_name not in self.bin_rectangles:
+            return False
+
+        info = self.bin_rectangles[bin_name]
+        theta = info["theta"]
+
+        if region == "drop":
+            center = info["drop"]["center"]
+            length = info["drop"]["length"]
+            width = info["drop"]["width"]
+        else:
+            center = info["center"]
+            length = info[region]["length"]
+            width = info[region]["width"]
+
+        return self.is_point_in_oriented_rectangle(point_xyz, center, theta, length, width)
+
+
 class ImageListener(Node):
     def __init__(self, topic, camera):
         super().__init__('image_listener')
@@ -989,6 +1403,10 @@ class TagDetectionListener(Node):
             self.camera.drawTagsInRGBImage(msg)
             #self.camera.compareContours(msg)
         #    self.camera.detectBlocksInDepthImage(msg)
+
+            self.camera.TagImageFrame = self.camera.draw_bin_regions_on_image(
+                self.camera.TagImageFrame
+            )
 
 
 
