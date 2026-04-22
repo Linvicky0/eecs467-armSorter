@@ -14,7 +14,7 @@ from functools import partial
 
 from PyQt5.QtCore import QThread, Qt, pyqtSignal, pyqtSlot, QTimer
 from PyQt5.QtGui import QPixmap, QImage, QCursor
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QMainWindow, QFileDialog
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QMainWindow, QFileDialog, QCheckBox, QPushButton, QLabel, QComboBox
 
 from resource.ui import Ui_MainWindow
 from rxarm import RXArm, RXArmThread
@@ -37,6 +37,50 @@ class Gui(QMainWindow):
         QWidget.__init__(self, parent)
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
+
+        # ---------------------------
+        # BLOCK SELECTION UI
+        # ---------------------------
+        self.class_names = [
+            "small_red_sphere", "small_red_cube",
+            "small_orange_sphere", "small_orange_cube",
+            "small_yellow_sphere", "small_yellow_cube",
+            "small_green_sphere", "small_green_cube",
+            "small_blue_sphere", "small_blue_cube",
+            "small_purple_sphere", "small_purple_cube",
+            "large_red_sphere", "large_red_cube",
+            "large_orange_sphere", "large_orange_cube",
+            "large_yellow_sphere", "large_yellow_cube",
+            "large_green_sphere", "large_green_cube",
+            "large_blue_sphere", "large_blue_cube",
+            "large_purple_sphere", "large_purple_cube"
+        ]
+
+        # Label
+        self.task_label = QLabel("Select up to 3 target classes:")
+
+        # Dropdowns
+        self.combo1 = QComboBox()
+        self.combo2 = QComboBox()
+        self.combo3 = QComboBox()
+
+        for c in self.class_names:
+            self.combo1.addItem(c)
+            self.combo2.addItem(c)
+            self.combo3.addItem(c)
+
+        # SORT button
+        self.sort_button = QPushButton("SORT")
+        self.sort_button.clicked.connect(self.startSorting)
+        
+        self.ui.Group2.insertWidget(0, self.task_label)
+        self.ui.Group2.insertWidget(1, self.combo1)
+        self.ui.Group2.insertWidget(2, self.combo2)
+        self.ui.Group2.insertWidget(3, self.combo3)
+        self.ui.Group2.insertWidget(4, self.sort_button)
+
+
+
         self.count = 52
         """ Groups of ui commonents """
         self.joint_readouts = [
@@ -331,6 +375,36 @@ class Gui(QMainWindow):
         self.ui.chk_directcontrol.setChecked(False)
         self.rxarm.enable_torque()
         self.sm.set_next_state('initialize_rxarm')
+
+     def createCheckbox(self, name):
+        from PyQt5.QtWidgets import QCheckBox
+        cb = QCheckBox(name)
+        cb.setChecked(True)  # default = select all
+        return cb
+    
+    def getSelectedBlocks(self):
+        selected = [
+            self.combo1.currentText(),
+            self.combo2.currentText(),
+            self.combo3.currentText()
+        ]
+
+        selected = list(set(selected))
+
+        print("Selected blocks:", selected)
+        return selected
+    
+    def startSorting(self):
+        selected = self.getSelectedBlocks()
+
+        if len(selected) == 0:
+            self.ui.rdoutStatus.setText("No targets selected")
+            return
+
+        self.ui.rdoutStatus.setText(f"Sorting {len(selected)} classes...")
+        print("SORT:", selected)
+
+        # self.runSortPipeline(selected) # TODO: edit this code to run in autonomous node, pass selected_types to camera()
 
 
 ### TODO: Add ability to parse POX config file as well
