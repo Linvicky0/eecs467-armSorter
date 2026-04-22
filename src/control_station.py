@@ -80,7 +80,6 @@ class Gui(QMainWindow):
         self.ui.Group2.insertWidget(4, self.sort_button)
 
 
-
         self.count = 52
         """ Groups of ui commonents """
         self.joint_readouts = [
@@ -375,12 +374,6 @@ class Gui(QMainWindow):
         self.ui.chk_directcontrol.setChecked(False)
         self.rxarm.enable_torque()
         self.sm.set_next_state('initialize_rxarm')
-
-     def createCheckbox(self, name):
-        from PyQt5.QtWidgets import QCheckBox
-        cb = QCheckBox(name)
-        cb.setChecked(True)  # default = select all
-        return cb
     
     def getSelectedBlocks(self):
         selected = [
