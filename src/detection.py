@@ -180,7 +180,8 @@ def detect_uniqueColors(frame, color, u= None, v=None):
             #     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2) 
         
 
-    return frame, mask, angle_deg
+            return frame, mask, angle_deg
+    return None, None, None
 
 # # --- Main Loop (for Webcam) ---
 # cap = cv2.VideoCapture(0)

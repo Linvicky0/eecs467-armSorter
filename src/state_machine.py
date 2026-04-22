@@ -290,23 +290,35 @@ class StateMachine():
         if target_world_pos is None: 
             return 
         
+
+        color = find_block(self.camera.VideoFrame, pt[0], pt[1])
+        if color is None:
+            angle =0
+        else:
+            _,_, angle = detect_uniqueColors(self.camera.VideoFrame, color, pt[0], pt[1])
+            if angle is None:
+                print("angle of block not found")
+                angle = 0
+        
+        rad = math.radians(angle)
         self.rxarm.arm.go_to_home_pose(moving_time=2,
                                     accel_time=0.5,
                                     blocking=True)
         self.status_message = "State: Pick - Click to pick"
         self.current_state = "pick"
-        self.auto_pick(target_world_pos, block_ori)
+        self.auto_pick(target_world_pos, block_ori, rad)
         # if self.rxarm.estop:
         #     self.next_state = "estop"
         self.next_state = "idle"
 
 
-    def auto_pick(self, _target_world_pos, block_ori, phi=np.pi/2, double_check=False, to_sky=False):
+    def auto_pick(self, _target_world_pos, block_ori, angle, phi=np.pi/2, double_check=False, to_sky=False):
 
         
         target_world_pos = copy.deepcopy(_target_world_pos)
         above_world_pos = copy.deepcopy(_target_world_pos)
         print("!!!!!!!!!!!!!!!!!!!!!!!!!!! pick pos:", target_world_pos)
+        print("angle of object:" , angle)
         xy_norm = np.linalg.norm(target_world_pos[:2])
         print(xy_norm)
         if xy_norm >= 315 and xy_norm<=430:
@@ -407,7 +419,7 @@ class StateMachine():
         
         print(f"joint angles from path: {joint_angles_2}")
      
-        joint_angles_2[-1] = joint_angles_2[0] # parallel to x axis
+        joint_angles_2[-1] = joint_angles_2[0] + angle # parallel to x axis
         print(f"joint angle base: {joint_angles_2[0]}")
 
 
@@ -424,7 +436,7 @@ class StateMachine():
                                                                               y=-target_world_pos[0]/1000, # motor's x axis is flipped
                                                                               z=((target_world_pos[2]/1000)+descend_offset), # position converted to meters
                                                                               pitch = phi,
-                                                                              roll = joint_angles_2[0],
+                                                                              roll = joint_angles_2[-1],
                                                                               moving_time = 4,
                                                                               execute = True)
 

@@ -1411,15 +1411,14 @@ class TagDetectionListener(Node):
                 if self.camera.extrinsic_matrix is None: 
                     self.camera.solve_extrinsic()
 
-               # self.camera.find_bin_rectangles_from_tags()
+             #   self.camera.find_bin_rectangles_from_tags()
 
             self.camera.drawTagsInRGBImage(msg)
             #self.camera.compareContours(msg)
-        #    self.camera.detectBlocksInDepthImage(msg)
 
-         #   self.camera.TagImageFrame = self.camera.draw_bin_regions_on_image(
+            # self.camera.TagImageFrame = self.camera.draw_bin_regions_on_image(
             #    self.camera.TagImageFrame
-           # )
+            # )
 
 
 
