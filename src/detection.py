@@ -26,7 +26,7 @@ hsv_ranges = {
     },
     'blue': {
         'lower': (95,100,50),
-        'upper': (125, 255,255)
+        'upper': (120, 255,255)
     },
     'green': {
         'lower': (30, 50,50),
@@ -44,14 +44,17 @@ hsv_ranges = {
 
 def find_block(image, u, v):
     # search in a bounding region for this block's color
+    # convert from rgb to hsv
     h_img, w_img = image.shape[:2]
-    y1, y2 = max(0, v-20), min(h_img, v+20)
-    x1, x2 = max(0, u-20), min(w_img, u+20)
+    y1, y2 = max(0, v-10), min(h_img, v+10)
+    x1, x2 = max(0, u-10), min(w_img, u+10)
     
     roi = image[y1:y2, x1:x2]
-    # roi = image[v-10:v+10, u-10:v+10]
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+
+
+    hsv = cv2.cvtColor(roi, cv2.COLOR_RGB2HSV)
     max_pixels = 0
+    color = None
 
     # find the color that has the most pixels in this region
     for color_name, bounds in hsv_ranges.items():
@@ -65,6 +68,8 @@ def find_block(image, u, v):
 
         pixel_count = cv2.countNonZero(mask)
 
+        print(f"pixel count {pixel_count} for color {color_name}")
+
         if pixel_count > max_pixels:
             max_pixels = pixel_count
             color = color_name
@@ -75,7 +80,7 @@ def find_block(image, u, v):
 
 def detect_uniqueColors(frame, color, u= None, v=None):
     # apply color masks
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
     if color == 'red':
         mask1 = cv2.inRange(hsv, 
                             np.array(hsv_ranges['red']['lower1']), 
@@ -175,31 +180,31 @@ def detect_uniqueColors(frame, color, u= None, v=None):
             #     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2) 
         
 
-    return frame, mask
+    return frame, mask, angle_deg
 
-# --- Main Loop (for Webcam) ---
-#cap = cv2.VideoCapture(0)
+# # --- Main Loop (for Webcam) ---
+# cap = cv2.VideoCapture(0)
 
-while True:
-   # ret, frame = cap.read()
-    #if not ret: break
-    image = cv2.imread('frame_27.png')
-    if image is None:
-        print("Error: could not find image")
+# while True:
+#    # ret, frame = cap.read()
+#     #if not ret: break
+#     image = cv2.imread('test3.png')
+#     if image is None:
+#         print("Error: could not find image")
     
-    processed_frame,mask = detect_uniqueColors(image, 'orange')
-    # found_color = find_block(image, 875, 359)
-    # processed_frame, mask = detect_uniqueColors(image, found_color)
-    # print(f"found color: {found_color}")
+#     processed_frame, mask = detect_uniqueColors(image, 'orange')
+#     # found_color = find_block(image, 875, 359)
+#     # processed_frame, mask = detect_uniqueColors(image, found_color)
+#     # print(f"found color: {found_color}")
 
-
-    
-    cv2.imshow('Block Orientation', processed_frame)
-    cv2.imshow('color mask', mask)
 
     
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+#     cv2.imshow('Block Orientation', processed_frame)
+#     cv2.imshow('color mask', mask)
 
-#cap.release()
-cv2.destroyAllWindows()
+    
+#     if cv2.waitKey(1) & 0xFF == ord('q'):
+#         break
+
+# #cap.release()
+# cv2.destroyAllWindows()

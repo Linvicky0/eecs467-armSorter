@@ -59,7 +59,6 @@ class Camera():
         self.TagDepthFrame = None
         self.comparison = None
 
-
         # mouse clicks & calibration variables
         self.camera_calibrated = False
         self.intrinsic_matrix = None
@@ -132,8 +131,15 @@ class Camera():
         
         # stores latest computed bin / buffer / drop regions
         self.bin_rectangles = {}
+        self.model = load_model()
 
-
+    def run_autonomous(self, selected_blocks):
+        return
+        while True:
+            blocks = find_target_blocks(self.model, self.VideoFrame, selected_blocks)
+            if len(blocks) == 0:
+                return
+            print(blocks[0])
 
     def Homography_Transform(self, image):
 
@@ -784,6 +790,8 @@ class Camera():
         
         # use the camera pinhole model to get height z
         pos = self.coord_pixel_to_world(u, v, d)
+        if pos is None:
+            return
         world_point[2,0] = pos[2]
     
         print(f"worldX: {world_point[0, 0]}, worldY: {world_point[1, 0]}, worldZ: {world_point[2,0]}") 
@@ -1141,9 +1149,11 @@ class Camera():
         self.bin_rectangles = {}
 
         if self.tag_detections is None:
+            print("tag detections not initialized")
             return self.bin_rectangles
 
         if self.extrinsic_matrix is None or self.intrinsic_matrix is None:
+            print("extrinsic matrix not computed")
             return self.bin_rectangles
 
         tag_lookup = {det.id: det for det in self.tag_detections}
@@ -1223,6 +1233,7 @@ class Camera():
             drop_corners = self.build_oriented_rectangle(
                 drop_center_xy, theta, drop_length, drop_width, drop_center_z
             )
+           # print("here")
 
             self.bin_rectangles[bin_name] = {
                 "tag_ids": (tag1_id, tag2_id),
@@ -1372,8 +1383,8 @@ class ImageListener(Node):
         except CvBridgeError as e:
             print(e)
 
-        self.camera.VideoFrame = self.camera.Homography_Transform(cv_image)
-      #  self.camera.VideoFrame = cv_image
+       # self.camera.VideoFrame = self.camera.Homography_Transform(cv_image)
+        self.camera.VideoFrame = cv_image
 
 
 class TagDetectionListener(Node):
@@ -1400,13 +1411,15 @@ class TagDetectionListener(Node):
                 if self.camera.extrinsic_matrix is None: 
                     self.camera.solve_extrinsic()
 
+               # self.camera.find_bin_rectangles_from_tags()
+
             self.camera.drawTagsInRGBImage(msg)
             #self.camera.compareContours(msg)
         #    self.camera.detectBlocksInDepthImage(msg)
 
-            self.camera.TagImageFrame = self.camera.draw_bin_regions_on_image(
-                self.camera.TagImageFrame
-            )
+         #   self.camera.TagImageFrame = self.camera.draw_bin_regions_on_image(
+            #    self.camera.TagImageFrame
+           # )
 
 
 

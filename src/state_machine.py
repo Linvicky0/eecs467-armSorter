@@ -11,6 +11,8 @@ import math
 import cv2
 from kinematics import clamp
 import modern_robotics as mr
+from detection import find_block
+from detection import detect_uniqueColors
 
 
 class StateMachine():
@@ -241,8 +243,17 @@ class StateMachine():
         pt = self.camera.last_click
 
         d = self.camera.DepthFrameRaw[pt[1]][pt[0]]
+
+        color = find_block(self.camera.VideoFrame, pt[0],pt[1])
+        print(f"color detected: {color}")
+        if color is None:
+            angle = 0
+        else:
+            _,_, angle = detect_uniqueColors(self.camera.VideoFrame, color, pt[0], pt[1])
+        print(f"angle of block: {angle}")
+
         print(f"pixelX: {pt[0]}, pixelY: {pt[1]}, depth: {d}")
-        self.rxarm.arm.get_joint_positions()
+     #   self.rxarm.arm.get_joint_positions()
 
 
         self.camera.pixel_to_World(pt[0], pt[1],d) # more accurate
@@ -272,6 +283,7 @@ class StateMachine():
         if self.camera.DepthFrameRaw is None:
             return
         z = self.camera.DepthFrameRaw[pt[1]][pt[0]]
+
 
         click_uvd = np.append(pt, z)
         target_world_pos, block_ori = self.get_block_xyz_from_click(click_uvd)
