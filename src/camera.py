@@ -112,10 +112,10 @@ class Camera():
                 "width": 150.0,        # mm
                 "buffer_pad_length": 25.0,
                 "buffer_pad_width": 10.0,
-                "drop_length": 175.0,
-                "drop_width": 100.0,
+                "drop_length": 170.0,
+                "drop_width": 110.0,
                 "drop_offset": [0.0, 0.0, 0.0],
-                "tag_to_bin_center": 110.0
+                "tag_to_bin_center": 130.0
             },
             "bin2": {
                 "tag_ids": (7, 8),   
@@ -123,10 +123,10 @@ class Camera():
                 "width": 150.0,
                 "buffer_pad_length": 25.0,
                 "buffer_pad_width": 10.0,
-                "drop_length": 175.0,
-                "drop_width": 100.0,
+                "drop_length": 170.0,
+                "drop_width": 110.0,
                 "drop_offset": [0.0, 0.0, 0.0],
-                "tag_to_bin_center": 110.0
+                "tag_to_bin_center": 130.0
             }
         }
         
@@ -142,7 +142,7 @@ class Camera():
                 return
             print(blocks[0])
             color = blocks["label"].split('_')[1]
-            frame, mask = detect_uniqueColors(self.VideoFrame, color)
+            frame, mask = detect_uniqueColors(self.VideoFrame, color, camera=self)
             print("center:", color['center'], "label:", color['label'])
             return
 
@@ -1380,6 +1380,35 @@ class Camera():
             width = info[region]["width"]
 
         return self.is_point_in_oriented_rectangle(point_xyz, center, theta, length, width)
+    
+    def build_bin_mask(self, image_shape, region="bin"):
+        """
+        Build an image-space mask for all known bin regions.
+
+        White = excluded region
+        Black = allowed region
+
+        region can be:
+            'bin'    -> exact bin area
+            'buffer' -> larger safety area
+            'drop'   -> drop zone only
+        """
+        h, w = image_shape[:2]
+        mask = np.zeros((h, w), dtype=np.uint8)
+
+        for bin_name, info in self.bin_rectangles.items():
+            corners_world = info[region]["corners"]
+            pixel_pts = []
+
+            for corner in corners_world:
+                px = self.world_to_pixel(corner[0], corner[1], corner[2])
+                if px is not None:
+                    pixel_pts.append(px)
+
+            if len(pixel_pts) == 4:
+                pts = np.array(pixel_pts, dtype=np.int32)
+                cv2.fillConvexPoly(mask, pts, 255)
+        return mask
 
 
 class ImageListener(Node):
@@ -1426,7 +1455,7 @@ class TagDetectionListener(Node):
                 if self.camera.extrinsic_matrix is None: 
                     self.camera.solve_extrinsic()
 
-             #   self.camera.find_bin_rectangles_from_tags()
+                self.camera.find_bin_rectangles_from_tags()
 
             self.camera.drawTagsInRGBImage(msg)
             #self.camera.compareContours(msg)

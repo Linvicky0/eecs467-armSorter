@@ -78,7 +78,7 @@ def find_block(image, u, v):
 
 
 
-def detect_uniqueColors(frame, color, u= None, v=None):
+def detect_uniqueColors(frame, color, camera=None, u= None, v=None):
     # apply color masks
     hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
     if color == 'red':
@@ -97,6 +97,14 @@ def detect_uniqueColors(frame, color, u= None, v=None):
     kernel = np.ones((5, 5), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+    # Exclude blocks already inside known bins
+    if camera is not None and hasattr(camera, "bin_rectangles") and len(camera.bin_rectangles) > 0:
+        # use "bin" for exact exclusion
+        # use "buffer" if you want a slightly larger safety region
+        bin_mask = camera.build_bin_exclusion_mask(frame.shape, region="bin")
+        allowed_mask = cv2.bitwise_not(bin_mask)
+        mask = cv2.bitwise_and(mask, allowed_mask)
 
     
     # 1. Pre-processing
