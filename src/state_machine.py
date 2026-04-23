@@ -314,14 +314,18 @@ class StateMachine():
         if color is None:
             angle = 0
         else:
-            _,_, angle = detect_uniqueColors(self.camera.VideoFrame, color, pt[0], pt[1])
+            _,_, angle, center_x, center_y = detect_uniqueColors(self.camera.VideoFrame, color, pt[0], pt[1])
         print(f"angle of block: {angle}")
 
         print(f"pixelX: {pt[0]}, pixelY: {pt[1]}, depth: {d}")
      #   self.rxarm.arm.get_joint_positions()
 
+        print(f"centerX: {center_x}, centerY: {center_y}")
+
 
         self.camera.pixel_to_World(pt[0], pt[1],d) # more accurate
+        self.camera.pixel_to_World(int(center_x), int(center_y),d) # more accurate
+
         
         #self.camera.coord_pixel_to_world(pt[0], pt[1], d)
         # if self.rxarm.estop:
@@ -355,16 +359,30 @@ class StateMachine():
         if target_world_pos is None: 
             return 
         
-
+        print("find block color")
         color = find_block(self.camera.VideoFrame, pt[0], pt[1])
         if color is None:
             angle =0
         else:
-            _,_, angle = detect_uniqueColors(self.camera.VideoFrame, color, pt[0], pt[1])
+            print("detect block")
+            _,_, angle, center_x, center_y = detect_uniqueColors(self.camera.VideoFrame, color, pt[0], pt[1])
             if angle is None:
                 print("angle of block not found")
                 angle = 0
-        
+
+           # target_world_pos, block_ori = self.get_block_xyz_from_click(click_uvd)
+            center_pos = self.camera.pixel_to_World(center_x,center_y,z)
+
+            if (center_pos[0] > 10):
+
+                target_world_pos[0] = center_pos[0] -10
+                target_world_pos[1] = center_pos[1] +10
+            else :
+                target_world_pos[0] = center_pos[0] + 10
+            print(f"center {center_pos[0]} {center_pos[1]-10}")
+
+            if (center_pos[1] < 0):
+                target_world_pos[1] +=10
         rad = math.radians(angle)
         self.rxarm.arm.go_to_home_pose(moving_time=2,
                                     accel_time=0.5,
@@ -419,8 +437,6 @@ class StateMachine():
         target_world_pos[2] = target_world_pos[2]  + pick_height_offset
 
 
-
-        
         
         if not reachable_low:
             print("final EE pose is not reachable")
@@ -429,30 +445,28 @@ class StateMachine():
 
 
 
-
         # Define how long the move takes and how many waypoints to check
-        time_in_seconds = 4.0
-        number_of_waypoints = 100 # Higher number = finer resolution for obstacle checking
+        # time_in_seconds = 4.0
+        # number_of_waypoints = 100 # Higher number = finer resolution for obstacle checking
 
         #  generates a path to final destination
-        trajectory = mr.JointTrajectory(current_joints, joint_angles_2, time_in_seconds, number_of_waypoints, 3)
+      #  trajectory = mr.JointTrajectory(current_joints, joint_angles_2, time_in_seconds, number_of_waypoints, 3)
 
-        
 
        # reachable_low, reachable_high = False, False
 
         # Try vertical reach with phi = pi/2
         # this function computes the path to get to the final EE and execute it if its valid
-        # joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
-        #                                                                       y=-target_world_pos[0]/1000, # motor's x axis is flipped
-        #                                                                       z=(target_world_pos[2])/1000, # position converted to meters
-        #                                                                       pitch = phi,
-        #                                                                       moving_time =2,
-        #                                                                       blocking= True,
-        #                                                                       execute = True)
+        joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
+                                                                              y=-target_world_pos[0]/1000, # motor's x axis is flipped
+                                                                              z=(target_world_pos[2])/1000, # position converted to meters
+                                                                              pitch = phi,
+                                                                              moving_time =2,
+                                                                              blocking= True,
+                                                                              execute = True)
     
-        for angles in trajectory:
-            self.rxarm.set_positions(angles)
+        # for angles in trajectory:
+        #     self.rxarm.set_positions(angles)
             
 
         # TODO: inside this function, check if there's obstacles. if so, don't execute the motor command
@@ -472,12 +486,19 @@ class StateMachine():
         print("EE descending")        
 
         # TODO: orient the wrist to align with object orientation before grasping
+
+        EE_angle = (joint_angles_2[0] + angle) 
+        if EE_angle >= 0:
+            EE_angle = EE_angle % (np.pi / 2)
+        else:
+            EE_angle = - (abs(EE_angle) % (np.pi/2))
         joint_angles_2, valid = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
                                                                             y=-target_world_pos[0]/1000, # motor's x axis is flipped
                                                                             z=((target_world_pos[2]/1000)), # position converted to meters
                                                                             pitch = phi,
-                                                                            moving_time = 4,
-                                                                            execute = False)
+                                                                            roll = EE_angle,
+                                                                         #   moving_time = 2,
+                                                                            execute = True)
         if valid is False:
             print("failed to descend arm")
             return
@@ -490,7 +511,7 @@ class StateMachine():
 
 
         # orient the wrist before descend
-        self.rxarm.arm._publish_commands(joint_angles_2, moving_time=2, accel_time=0, blocking=True)
+       # self.rxarm.arm._publish_commands(joint_angles_2, moving_time=2, accel_time=0, blocking=True)
 
 
         #TODO: check for obstacle before descending
@@ -501,8 +522,7 @@ class StateMachine():
                                                                               y=-target_world_pos[0]/1000, # motor's x axis is flipped
                                                                               z=((target_world_pos[2]/1000)+descend_offset), # position converted to meters
                                                                               pitch = phi,
-                                                                              roll = joint_angles_2[-1],
-                                                                              moving_time = 4,
+                                                                              roll = EE_angle,
                                                                               execute = True)
 
         self.rxarm.gripper_grasp()
@@ -749,6 +769,7 @@ class StateMachine():
         # Use the function we just added to your Camera class!
         #world_pos = self.camera.coord_pixel_to_world(u, v, z)
         world_pos = self.camera.pixel_to_World(u,v,z)
+        print("here1")
         
         
 
