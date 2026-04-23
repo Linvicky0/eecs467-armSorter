@@ -396,7 +396,7 @@ class Gui(QMainWindow):
 
         self.ui.rdoutStatus.setText(f"Sorting {len(selected)} classes...")
 
-       # self.camera.run_autonomous(selected) # TODO: edit this code to run in autonomous node, pass selected_types to camera()
+        self.camera.run_autonomous(selected) # TODO: edit this code to run in autonomous node, pass selected_types to camera()
 
 
 ### TODO: Add ability to parse POX config file as well

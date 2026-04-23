@@ -425,6 +425,8 @@ class StateMachine():
         EE_angle = (joint_angles_2[0] + angle) 
         if EE_angle >= 0:
             EE_angle = EE_angle % (np.pi / 2)
+        else:
+            EE_angle = - (abs(EE_angle) % (np.pi/2))
         joint_angles_2, valid = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
                                                                             y=-target_world_pos[0]/1000, # motor's x axis is flipped
                                                                             z=((target_world_pos[2]/1000)), # position converted to meters
