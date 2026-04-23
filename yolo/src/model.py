@@ -71,6 +71,7 @@ def find_target_blocks(model, image, target_blocks):
         if class_name in target_blocks:
             confidence = round(box.conf[0].item(), 2)
             bbox = box.xyxy[0].tolist()
+            bbox = get_bbox_pixels(bbox, image.shape)
             x1 = int(bbox[0])
             y1 = int(bbox[1])
             x2 = int(bbox[2])

@@ -134,12 +134,12 @@ class Camera():
         self.model = load_model()
 
     def run_autonomous(self, selected_blocks):
-        return
         while True:
             blocks = find_target_blocks(self.model, self.VideoFrame, selected_blocks)
             if len(blocks) == 0:
                 return
             print(blocks[0])
+
 
     def Homography_Transform(self, image):
 
