@@ -1,6 +1,8 @@
 """!
 The state machine that implements the logic.
 """
+
+
 from PyQt5.QtCore import QThread, Qt, pyqtSignal, pyqtSlot, QTimer
 import time
 import numpy as np
@@ -14,7 +16,8 @@ from kinematics import clamp
 import modern_robotics as mr
 from detection import find_block
 from detection import detect_uniqueColors
-
+from std_msgs.msg import Int8MultiArray
+from rclpy.node import Node
 
 class StateMachine():
     """!
@@ -59,6 +62,7 @@ class StateMachine():
         self.human_detected = False
         self.paused_state = None
         self.is_human_paused = False
+        
         self.inner_indices = [r * 8 + c for r in range(1, 7) for c in range(1, 7)]
 
         self.node = rclpy.create_node('state_machine_thermal_sub')
@@ -68,6 +72,7 @@ class StateMachine():
             self.thermal_callback,
             10
         )
+
 
         self.ros_thread = threading.Thread(target=rclpy.spin, args=(self.node,), daemon=True)
         self.ros_thread.start()
@@ -314,7 +319,12 @@ class StateMachine():
         if color is None:
             angle = 0
         else:
-            _,_, angle, center_x, center_y = detect_uniqueColors(self.camera.VideoFrame, color, pt[0], pt[1])
+            objects = detect_uniqueColors(self.camera.VideoFrame, color, pt[0], pt[1])
+            object = objects[0]
+            angle = object['angle']
+            center_x = object['center_x']
+            center_y = object['center-y']
+       #     _,_, angle, center_x, center_y = detect_uniqueColors(self.camera.VideoFrame, color, pt[0], pt[1])
         print(f"angle of block: {angle}")
 
         print(f"pixelX: {pt[0]}, pixelY: {pt[1]}, depth: {d}")
@@ -365,7 +375,12 @@ class StateMachine():
             angle =0
         else:
             print("detect block")
-            _,_, angle, center_x, center_y = detect_uniqueColors(self.camera.VideoFrame, color, pt[0], pt[1])
+            objects = detect_uniqueColors(self.camera.VideoFrame, color, pt[0], pt[1])
+            object = objects[0]
+            angle = object['angle']
+            center_x = object['center_x']
+            center_y = object['center_y']
+          #  _,_, angle, center_x, center_y = detect_uniqueColors(self.camera.VideoFrame, color, pt[0], pt[1])
             if angle is None:
                 print("angle of block not found")
                 angle = 0
@@ -383,6 +398,7 @@ class StateMachine():
 
             if (center_pos[1] < 0):
                 target_world_pos[1] +=10
+
         rad = math.radians(angle)
         self.rxarm.arm.go_to_home_pose(moving_time=2,
                                     accel_time=0.5,

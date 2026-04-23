@@ -99,21 +99,11 @@ def detect_uniqueColors(frame, color, u= None, v=None):
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
     
-    # 1. Pre-processing
-    # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    # blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    
-    # # 2. Edge Detection (Canny)
-    # # You may need to tune 50 and 150 based on your lighting
-    # edges = cv2.Canny(blurred, 50, 150)
-    
-    # # 3. Morphological closing to join gaps in edges
-    # kernel = np.ones((5,5), np.uint8)
-    # closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
-    
-    # 4. Find Contours
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
+    # find the list of detected blocks
+    detected = []
+
     for cnt in contours:
         # check that the pixel is inside the contour
         is_inside = True
@@ -180,10 +170,17 @@ def detect_uniqueColors(frame, color, u= None, v=None):
             
             # cv2.putText(frame, f"pixel: {int(x)}, {int(y)}", (int(x), int(y) + 70), 
             #     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2) 
-        
 
-            return frame, mask, angle_deg, center_x, center_y
-    return None, None, None
+            object = {
+                "angle": angle_deg,
+                "center_x": center_x,
+                "center_y": center_y
+            }
+            
+            detected.append(object)
+           # return angle_deg, center_x, center_y
+    return detected
+    #return None, None, None
 
 # # --- Main Loop (for Webcam) ---
 # cap = cv2.VideoCapture(0)

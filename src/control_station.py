@@ -1,4 +1,8 @@
 #!/usr/bin/python
+# export ROS_DOMAIN_ID=1
+# export ROS_LOCALHOST_ONLY=0
+# export ROS_STATIC_PEERS=67.194.43.55
+
 """!
 Main GUI for Arm lab
 """
@@ -204,7 +208,7 @@ class Gui(QMainWindow):
         self.human_warning_label.setVisible(False)   # hidden by default
 
         # Insert at top of the main layout — adjust Group name to match your UI
-        self.ui.Group1.insertWidget(0, self.human_warning_label)
+        self.ui.Group2.insertWidget(5, self.human_warning_label)
 
     """ Slots attach callback functions to signals emitted from threads"""
 

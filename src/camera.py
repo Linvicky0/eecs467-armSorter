@@ -140,8 +140,9 @@ class Camera():
             blocks = find_target_blocks(self.model, img_bgr, selected_blocks)
             if len(blocks) == 0:
                 return
-            print(blocks[0])
-            color = blocks["label"].split('_')[1]
+            block = next(iter(blocks))[0]
+            print(block)
+            color = block["label"].split('_')[1]
             frame, mask = detect_uniqueColors(self.VideoFrame, color)
             print("center:", color['center'], "label:", color['label'])
             return
