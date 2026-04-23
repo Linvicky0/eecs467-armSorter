@@ -110,23 +110,23 @@ class Camera():
                 "tag_ids": (5, 6),   
                 "length": 220.0,       # mm
                 "width": 150.0,        # mm
-                "buffer_pad_length": 25.0,
-                "buffer_pad_width": 10.0,
-                "drop_length": 175.0,
-                "drop_width": 100.0,
+                "buffer_pad_length": 45.0,
+                "buffer_pad_width": 20.0,
+                "drop_length": 170.0,
+                "drop_width": 110.0,
                 "drop_offset": [0.0, 0.0, 0.0],
-                "tag_to_bin_center": 110.0
+                "tag_to_bin_center": 130.0
             },
             "bin2": {
                 "tag_ids": (7, 8),   
                 "length": 220.0,
                 "width": 150.0,
-                "buffer_pad_length": 25.0,
-                "buffer_pad_width": 10.0,
-                "drop_length": 175.0,
-                "drop_width": 100.0,
+                "buffer_pad_length": 45.0,
+                "buffer_pad_width": 20.0,
+                "drop_length": 170.0,
+                "drop_width": 110.0,
                 "drop_offset": [0.0, 0.0, 0.0],
-                "tag_to_bin_center": 110.0
+                "tag_to_bin_center": 130.0
             }
         }
         
@@ -383,196 +383,7 @@ class Camera():
         return cv2.getAffineTransform(pts1, pts2)
 
         
-
        
-    def blockDetector(self):
-        # 1. Convert to Grayscale
-        gray = cv2.cvtColor(self.VideoFrame, cv2.COLOR_RGB2GRAY)
-        
-        # 2. Use a more robust Threshold (Otsu's method is better than a fixed 127)
-        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        
-        # 3. Find Contours
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        # Clear old detections
-        self.block_detections.reset()
-
-        for contour in contours:
-            # Calculate Area to filter out noise
-            area = cv2.contourArea(contour)
-            if area < 500: # Adjust based on your camera height
-                continue
-
-            # 4. Calculate Center (Moments)
-            M = cv2.moments(contour)
-            if M["m00"] != 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
-                
-                # 5. Get Depth (Z) at this center point
-                # Ensure cx, cy are within bounds
-                cz = self.DepthFrameRaw[cy, cx]
-
-                # 6. Convert Pixel (u, v, d) to World (X, Y, Z)
-                # You likely have a function for this already
-                world_coords = self.pixel_to_World(cx, cy, cz)
-
-                # 7. Store the detection
-                self.block_detections['uvds'].append([cx, cy, cz])
-                self.block_detections['xyzs'].append(world_coords)
-                self.block_detections['contours'].append(contour)
-                
-                # Optional: Calculate rotation
-                rect = cv2.minAreaRect(contour)
-                theta = rect[2]
-                self.block_detections['thetas'].append(np.deg2rad(theta))
-
-        # 8. Visual Feedback
-        self.block_contours = contours
-        cv2.drawContours(self.VideoFrame, self.block_contours, -1, (255, 0, 255), 3)
-     #   cv2.imshow('')
-        
-
-
-
-    def detectBlocksInDepthImage(self, _lower=700, _upper=960, blind_rect=None, sort_key="color"):
-        """!
-        @brief      Detect blocks from depth
-
-                    TODO: Implement a blob detector to find blocks in the depth image
-        """
-        self.block_detections.reset()
-        lower = _lower
-        upper = _upper
-        """mask out arm & outside board"""
-        # self.ProcessDepthFrameRaw = cv2.GaussianBlur(self.ProcessDepthFrameRaw, (5, 5), 3)
-        self.ProcessDepthFrameRaw = cv2.medianBlur(self.ProcessDepthFrameRaw, 3)
-        mask = np.zeros_like(self.ProcessDepthFrameRaw, dtype=np.uint8)
-        # !!! Attention to these rectangles's range
-        cv2.rectangle(mask, (225, 90), (1083, 700), 255, cv2.FILLED)
-        cv2.rectangle(mask, (570, 400),(735, 700), 0, cv2.FILLED)
-        if blind_rect is not None:
-            cv2.rectangle(mask, blind_rect[0], blind_rect[1], 0, cv2.FILLED)
-
-        depth_seg = cv2.inRange(self.ProcessDepthFrameRaw, lower, upper)
-        img_depth_thr = cv2.bitwise_and(depth_seg, mask)
-
-        contours, _ = cv2.findContours(img_depth_thr, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2:]
-
-        self.block_detections['all_contours'] = contours
-
-
-        for contour in contours:
-            M = cv2.moments(contour)
-            if M['m00'] < 200 or abs(M["m00"]) > 7000:
-                # reject false positive detections by area size
-                continue
-            mask_single = np.zeros_like(self.ProcessDepthFrameRaw, dtype=np.uint8)
-            cv2.drawContours(mask_single, [contour], -1, 255, cv2.FILLED)
-            depth_single = cv2.bitwise_and(self.ProcessDepthFrameRaw, self.ProcessDepthFrameRaw, mask=mask_single)
-            depth_array = depth_single[depth_single>=lower]
-
-            # Stats mode range
-            mode_real, _ = stats.mode(depth_array)
-            # print("real mode", mode_real)
-            depth_diff =  mode_real - depth_array
-            depth_array_inliers = depth_array[depth_diff<8]
-
-            # Inter Quartile Range
-            # Q1 = np.percentile(depth_array, 25, interpolation = 'midpoint')
-            # Q3 = np.percentile(depth_array, 75, interpolation = 'midpoint')
-            # IQR = Q3 - Q1
-            # mode_lower = Q1 - 1.5 * IQR # outlier lower bound
-            # print("IQR lower", mode_lower)
-            # depth_array_inliers = depth_array[depth_array>=mode_lower]
-            
-            mode = np.min(depth_array_inliers)
-            # mode = np.min(depth_array)
-            # print("result min", mode)
-            # !!! Attention to the mode offset, it determines how much of the top surface area will be reserved
-            depth_new = cv2.inRange(depth_single, lower, int(mode)+5)
-            contours_new, _ = cv2.findContours(depth_new, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2:]
-            if not contours_new:
-                continue
-            contours_new_valid = max(contours_new, key=cv2.contourArea) # find the largest contour
-            M = cv2.moments(contours_new_valid)
-
-            if abs(M["m00"]) < 200:
-                # reject false positive detections by area size
-                continue
-            elif abs(M["m00"]) > 2000:
-                # TODO add seg model
-                print("Cluster detected with moment:", M["m00"])
-                self.block_detections.reset()
-                self.block_detections['all_contours'] = contours
-                self.block_detections['has_cluster'] = True
-                # # generate new mask for new valid contours
-                # mask_new_single = np.zeros_like(mask_single, dtype=np.uint8)
-                # cv2.drawContours(mask_new_single, [contours_new_valid], -1, 255, cv2.FILLED)
-                # # segmente rgb image using new mask
-                # rgb_single = cv2.bitwise_and(self.ProcessVideoFrame, self.ProcessVideoFrame, mask=mask_new_single)
-                # input_img = BlocksDataset.transform(torch.from_numpy(rgb_single).to(torch.float).permute(2, 0, 1)).unsqueeze(0)
-                # # input_img (1, 3, 244, 244)
-                # output_pred = self.model(input_img.to(self.device))
-                # # output_pred (1, 7, 244, 244)
-                # output = torch.argmax(output_pred, 1).squeeze(0).cpu().numpy()
-                # # output (244, 244) int64
-                # bins = np.bincount(output.flatten())
-                # if np.count_nonzero(bins[1:])>1:
-                #     output_img = output.astype(np.float32) * 255/6
-                #     output_mask = cv2.resize(output_img , (1280,720))
-                #     print("Your model really find something??!!")
-                #     print("model colors:{}".format(bins[1:]))
-                #     cv2.imwrite("data/treasures_%d.png" % (random()*1000), output_mask)
-                # pass
-            cx = int(M['m10']/M['m00'])
-            cy = int(M['m01']/M['m00'])
-            cz = self.ProcessDepthFrameRaw[cy, cx]
-            block_ori = - cv2.minAreaRect(contours_new_valid)[2] # turn the range from [-90, 0) to (0, 90]
-            # print(block_ori)
-
-            block_xyz = self.pixel_to_World(cx, cy, cz)
-              # !!! size classification: attention to this moment threshold
-            if M["m00"] < 850:
-                block_xyz[2] = block_xyz[2] - 12.5
-                self.block_detections['sizes'].append(1) # 1 for small
-            else:
-                block_xyz[2] = block_xyz[2] - 19
-                self.block_detections['sizes'].append(0) # 0 for large
-
-            self.block_detections['uvds'].append([cx, cy, cz])
-            self.block_detections['xyzs'].append(block_xyz)
-            self.block_detections['contours'].append(contours_new_valid)
-            self.block_detections['thetas'].append(np.deg2rad(block_ori))
-            self.block_detections['colors'].append(self.retrieve_area_color(self.ProcessVideoFrame, self.ProcessVideoFrameLab, self.ProcessVideoFrameHSV, contours_new_valid))
-            
-            # print(self.color_id[self.block_detections.colors[-1]], M["m00"])
-            if self.block_detections['has_cluster']:
-                break
-
-        self.block_detections.update(sort_key)
-        alignment_frame = self.VideoFrame.copy()
-
-       # 2. Draw RGB contours in NEON BLUE
-        # These are from your blockDetector() function
-        if hasattr(self, 'block_contours') and self.block_contours is not None:
-            cv2.drawContours(alignment_frame, self.block_contours, -1, (255, 255, 0), 2)
-
-        # 3. Draw DEPTH contours in NEON MAGENTA
-        # These are the ones you just found in the depth image
-        if self.block_detections['contours']:
-            cv2.drawContours(alignment_frame, self.block_detections['contours'], -1, (255, 0, 255), 2)
-
-        # 4. Add a legend so you know which is which
-        cv2.putText(alignment_frame, "CYAN: RGB | MAGENTA: Depth", (20, 50), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-        # 5. Display the comparison
-        # cv2.imshow("Sensor Alignment Check", alignment_frame)
-        # cv2.waitKey(1)
-
-
     def drawAlignmentComparison(self):
         # 1. Use the current RGB frame as the background
         canvas = self.VideoFrame.copy()
@@ -712,7 +523,7 @@ class Camera():
 
 
 
-    def coord_pixel_to_world(self, u, v, d):
+    def coord_pixel_to_world(self, u, v, d, do_print):
         '''
         Convert pixel coordinates (from camera frame) to world coordinates
         u: pixel x coordinate
@@ -723,7 +534,8 @@ class Camera():
         u = int(u)
         v= int(v)
         if self.extrinsic_matrix is None:
-            print("extrinsic matrix is undefined")
+            if (do_print):
+                print("extrinsic matrix is undefined")
             return
         
         if (self.max_depth is None):
@@ -733,8 +545,10 @@ class Camera():
             z = 0   # z must be positive
         else:
             z = self.max_depth - d
- 
-        print("original z from depth frame: ", z)
+    
+
+        if (do_print):
+            print("original z from depth frame: ", z)
 
         index = np.array([u, v, 1]).reshape((3,1))
         pos_camera = d * np.matmul(self.intrinsic_matrix_inv, index)
@@ -743,7 +557,8 @@ class Camera():
         world_pos = np.matmul(extrinsic_matrix_inv, temp_pos)
     
         pos = world_pos.flatten()[:3]
-        print(f"original height z: {pos[2]}")
+        if (do_print):
+            print(f"original height z: {pos[2]}")
 
         offset = 15
         roi = self.DepthFrameRaw[v-offset:v+offset, u-offset:u+offset]
@@ -754,7 +569,6 @@ class Camera():
         d= min_depth
 
         z = self.max_depth - min_depth
-        print(f"min z around the pixel: {z}")
         
         index = np.array([u, v, 1]).reshape((3,1))
         pos_camera = d * np.matmul(self.intrinsic_matrix_inv, index)
@@ -771,10 +585,11 @@ class Camera():
     
 
 
-    def pixel_to_World(self, u, v,d):
+    def pixel_to_World(self, u, v,d, do_print):
         """Convert Pixel coordinates to World using extrinsic matrix """
         if self.extrinsic_matrix is None: 
-            print("extrinsic matrix is undefined")
+            if do_print:
+                print("extrinsic matrix is undefined")
             return None
         
         u = int(u)
@@ -802,13 +617,14 @@ class Camera():
 
         
         # use the camera pinhole model to get height z
-        pos = self.coord_pixel_to_world(u, v, d)
+        pos = self.coord_pixel_to_world(u, v, d, do_print)
         if pos is None:
             return
         
         world_point[2,0] = pos[2]
     
-        print(f"worldX: {world_point[0, 0]}, worldY: {world_point[1, 0]}, worldZ: {world_point[2,0]}") 
+        if do_print:
+            print(f"worldX: {world_point[0, 0]}, worldY: {world_point[1, 0]}, worldZ: {world_point[2,0]}") 
 
         return [world_point[0, 0], world_point[1, 0], world_point[2,0]] # invert y axis to align with motor direction
 
@@ -1031,7 +847,7 @@ class Camera():
         if d is None:
             return None
 
-        return self.pixel_to_World(cx, cy, d)
+        return self.pixel_to_World(cx, cy, d, False)
 
 
     def get_tag_bottom_edge_world(self, detection):
@@ -1059,8 +875,8 @@ class Camera():
         if d_bl is None or d_br is None:
             return None
 
-        p_bl = self.pixel_to_World(int(c_bl.x), int(c_bl.y), d_bl)
-        p_br = self.pixel_to_World(int(c_br.x), int(c_br.y), d_br)
+        p_bl = self.pixel_to_World(int(c_bl.x), int(c_bl.y), d_bl, False)
+        p_br = self.pixel_to_World(int(c_br.x), int(c_br.y), d_br, False)
 
         if p_bl is None or p_br is None:
             return None
@@ -1361,7 +1177,7 @@ class Camera():
         return (abs(proj_u) <= length / 2.0) and (abs(proj_v) <= width / 2.0)
 
 
-    def point_in_bin_region(self, point_xyz, bin_name, region="bin"):
+    def point_in_bin_region(self, point_xyz, bin_name, region="buffer"):
         """
         region can be 'bin', 'buffer', or 'drop'
         """
@@ -1381,6 +1197,35 @@ class Camera():
             width = info[region]["width"]
 
         return self.is_point_in_oriented_rectangle(point_xyz, center, theta, length, width)
+    
+    def build_bin_mask(self, image_shape, region="bin"):
+        """
+        Build an image-space mask for all known bin regions.
+
+        White = excluded region
+        Black = allowed region
+
+        region can be:
+            'bin'    -> exact bin area
+            'buffer' -> larger safety area
+            'drop'   -> drop zone only
+        """
+        h, w = image_shape[:2]
+        mask = np.zeros((h, w), dtype=np.uint8)
+
+        for bin_name, info in self.bin_rectangles.items():
+            corners_world = info[region]["corners"]
+            pixel_pts = []
+
+            for corner in corners_world:
+                px = self.world_to_pixel(corner[0], corner[1], corner[2])
+                if px is not None:
+                    pixel_pts.append(px)
+
+            if len(pixel_pts) == 4:
+                pts = np.array(pixel_pts, dtype=np.int32)
+                cv2.fillConvexPoly(mask, pts, 255)
+        return mask
 
 
 class ImageListener(Node):
@@ -1427,14 +1272,14 @@ class TagDetectionListener(Node):
                 if self.camera.extrinsic_matrix is None: 
                     self.camera.solve_extrinsic()
 
-             #   self.camera.find_bin_rectangles_from_tags()
+                self.camera.find_bin_rectangles_from_tags()
 
             self.camera.drawTagsInRGBImage(msg)
             #self.camera.compareContours(msg)
 
-            # self.camera.TagImageFrame = self.camera.draw_bin_regions_on_image(
-            #    self.camera.TagImageFrame
-            # )
+            self.camera.TagImageFrame = self.camera.draw_bin_regions_on_image(
+               self.camera.TagImageFrame
+            )
 
 
 

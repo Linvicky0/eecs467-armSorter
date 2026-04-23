@@ -65,17 +65,16 @@ class StateMachine():
         
         self.inner_indices = [r * 8 + c for r in range(1, 7) for c in range(1, 7)]
 
-        self.node = rclpy.create_node('state_machine_thermal_sub')
-        self.thermal_sub = self.node.create_subscription(
-            Int8MultiArray,
-            '/thermal_binary_grid',
-            self.thermal_callback,
-            10
-        )
+        # self.node = rclpy.create_node('state_machine_thermal_sub')
+        # self.thermal_sub = self.node.create_subscription(
+        #     Int8MultiArray,
+        #     '/thermal_binary_grid',
+        #     self.thermal_callback,
+        #     10
+        # )
 
-
-        self.ros_thread = threading.Thread(target=rclpy.spin, args=(self.node,), daemon=True)
-        self.ros_thread.start()
+        # self.ros_thread = threading.Thread(target=rclpy.spin, args=(self.node,), daemon=True)
+        # self.ros_thread.start()
 
     def set_next_state(self, state):
         """!
@@ -316,25 +315,34 @@ class StateMachine():
 
         color = find_block(self.camera.VideoFrame, pt[0],pt[1])
         print(f"color detected: {color}")
+        angle = 0
+        center_x = None
+        center_y = None
         if color is None:
             angle = 0
         else:
-            objects = detect_uniqueColors(self.camera.VideoFrame, color, pt[0], pt[1])
-            object = objects[0]
-            angle = object['angle']
-            center_x = object['center_x']
-            center_y = object['center-y']
+            objects = detect_uniqueColors(self.camera.VideoFrame, color, self.camera, pt[0], pt[1])
+            if len(objects) > 0:
+                object = objects[0]
+                angle = object['angle']
+                center_x = object['center_x']
+                center_y = object['center_y']
        #     _,_, angle, center_x, center_y = detect_uniqueColors(self.camera.VideoFrame, color, pt[0], pt[1])
-        print(f"angle of block: {angle}")
-
-        print(f"pixelX: {pt[0]}, pixelY: {pt[1]}, depth: {d}")
-     #   self.rxarm.arm.get_joint_positions()
-
-        print(f"centerX: {center_x}, centerY: {center_y}")
 
 
-        self.camera.pixel_to_World(pt[0], pt[1],d) # more accurate
-        self.camera.pixel_to_World(int(center_x), int(center_y),d) # more accurate
+        self.camera.pixel_to_World(pt[0], pt[1],d, True) # more accurate
+
+        if len(objects) > 0:
+            print(f"angle of block: {angle}")
+
+            print(f"pixelX: {pt[0]}, pixelY: {pt[1]}, depth: {d}")
+        #   self.rxarm.arm.get_joint_positions()
+        
+            print(f"centerX: {center_x}, centerY: {center_y}")
+            self.camera.pixel_to_World(int(center_x), int(center_y),d, True) # more accurate
+
+
+
 
         
         #self.camera.coord_pixel_to_world(pt[0], pt[1], d)
@@ -386,7 +394,7 @@ class StateMachine():
                 angle = 0
 
            # target_world_pos, block_ori = self.get_block_xyz_from_click(click_uvd)
-            center_pos = self.camera.pixel_to_World(center_x,center_y,z)
+            center_pos = self.camera.pixel_to_World(center_x,center_y,z, True)
 
             if (center_pos[0] > 10):
 
@@ -784,7 +792,7 @@ class StateMachine():
         
         # Use the function we just added to your Camera class!
         #world_pos = self.camera.coord_pixel_to_world(u, v, z)
-        world_pos = self.camera.pixel_to_World(u,v,z)
+        world_pos = self.camera.pixel_to_World(u,v,z, True)
         print("here1")
         
         
