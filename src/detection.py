@@ -131,6 +131,8 @@ def detect_uniqueColors(frame, color, u= None, v=None):
             box = cv2.boxPoints(rect)
             box = np.array(box, dtype=int)
 
+            center_x, center_y = rect[0]
+
             # order the corners from increasing y
             sorted_indices = np.argsort(box[:, 1])
             top_points = box[sorted_indices[2:]] # The two points with largest Y
@@ -180,7 +182,7 @@ def detect_uniqueColors(frame, color, u= None, v=None):
             #     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2) 
         
 
-            return frame, mask, angle_deg
+            return frame, mask, angle_deg, center_x, center_y
     return None, None, None
 
 # # --- Main Loop (for Webcam) ---

@@ -23,6 +23,7 @@ from pathlib import Path
 import pyrealsense2 as rs
 # import scipy.ndimage as ndimage
 import math
+from detection import detect_uniqueColors
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -135,10 +136,15 @@ class Camera():
 
     def run_autonomous(self, selected_blocks):
         while True:
-            blocks = find_target_blocks(self.model, self.VideoFrame, selected_blocks)
+            img_bgr = cv2.cvtColor(self.VideoFrame, cv2.COLOR_RGB2BGR)
+            blocks = find_target_blocks(self.model, img_bgr, selected_blocks)
             if len(blocks) == 0:
                 return
             print(blocks[0])
+            color = blocks["label"].split('_')[1]
+            frame, mask = detect_uniqueColors(self.VideoFrame, color)
+            print("center:", color['center'], "label:", color['label'])
+            return
 
 
     def Homography_Transform(self, image):
@@ -712,6 +718,9 @@ class Camera():
         v: pixel y coordinate
         depth: depth value at pixel (u, v) # TODO: find its units
         '''
+
+        u = int(u)
+        v= int(v)
         if self.extrinsic_matrix is None:
             print("extrinsic matrix is undefined")
             return
@@ -766,6 +775,9 @@ class Camera():
         if self.extrinsic_matrix is None: 
             print("extrinsic matrix is undefined")
             return None
+        
+        u = int(u)
+        v = int(v)
 
         pixel_vector = np.array([[u],[v], [1]])
 
@@ -792,6 +804,7 @@ class Camera():
         pos = self.coord_pixel_to_world(u, v, d)
         if pos is None:
             return
+        
         world_point[2,0] = pos[2]
     
         print(f"worldX: {world_point[0, 0]}, worldY: {world_point[1, 0]}, worldZ: {world_point[2,0]}") 
@@ -1380,8 +1393,10 @@ class ImageListener(Node):
     def callback(self, data):
         try:
             cv_image = self.bridge.imgmsg_to_cv2(data, data.encoding)
+           # print(f"data {data.encoding}")
         except CvBridgeError as e:
             print(e)
+
 
        # self.camera.VideoFrame = self.camera.Homography_Transform(cv_image)
         self.camera.VideoFrame = cv_image
