@@ -22,6 +22,9 @@ from camera import Camera, VideoThread
 from state_machine import StateMachine, StateMachineThread
 from kinematics import IK_geometric
 
+from PyQt5.QtWidgets import QLabel
+from PyQt5.QtGui import QFont
+
 """ Radians to/from  Degrees conversions """
 D2R = np.pi / 180.0
 R2D = 180.0 / np.pi
@@ -145,8 +148,8 @@ class Gui(QMainWindow):
         self.ui.btnUser6.clicked.connect(partial(nxt_if_arm_init, 'play'))
         self.ui.btnUser7.setText('Detect Blocks')
         self.ui.btnUser7.clicked.connect(partial(nxt_if_arm_init, 'detect'))
-        self.ui.btnUser10.setText('Click Clean')
-        self.ui.btnUser10.clicked.connect(partial(nxt_if_arm_init, 'clean'))
+        self.ui.btnUser10.setText('Click Human Safety')
+        self.ui.btnUser10.clicked.connect(partial(nxt_if_arm_init, 'human'))
         self.ui.btnUser11.setText('Click Grab')
         self.ui.btnUser11.clicked.connect(partial(nxt_if_arm_init, 'pick'))
         self.ui.btnUser12.setText('Click Place')
@@ -175,6 +178,7 @@ class Gui(QMainWindow):
         self.StateMachineThread = StateMachineThread(self.sm)
         self.StateMachineThread.updateStatusMessage.connect(
             self.updateStatusMessage)
+        self.StateMachineThread.updateHumanDetected.connect(self.updateHumanWarning)
         self.StateMachineThread.start()
         self.VideoThread = VideoThread(self.camera)
         self.VideoThread.updateFrame.connect(self.setImage)
@@ -185,11 +189,32 @@ class Gui(QMainWindow):
             self.updateEndEffectorReadout)
         self.ArmThread.start()
 
+        self.human_warning_label = QLabel("⚠ HUMAN DETECTED — ARM PAUSED")
+        self.human_warning_label.setAlignment(Qt.AlignCenter)
+        self.human_warning_label.setStyleSheet("""
+            QLabel {
+                background-color: red;
+                color: white;
+                font-size: 16px;
+                font-weight: bold;
+                padding: 6px;
+                border-radius: 4px;
+            }
+        """)
+        self.human_warning_label.setVisible(False)   # hidden by default
+
+        # Insert at top of the main layout — adjust Group name to match your UI
+        self.ui.Group1.insertWidget(0, self.human_warning_label)
+
     """ Slots attach callback functions to signals emitted from threads"""
 
     @pyqtSlot(str)
     def updateStatusMessage(self, msg):
         self.ui.rdoutStatus.setText(msg)
+
+    @pyqtSlot(bool)
+    def updateHumanWarning(self, detected):
+        self.human_warning_label.setVisible(detected)
 
     @pyqtSlot(list)
     def updateJointReadout(self, joints):

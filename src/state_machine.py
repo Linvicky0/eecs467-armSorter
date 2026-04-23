@@ -9,6 +9,7 @@ from kinematics import IK_geometric
 import copy
 import math 
 import cv2
+import threading
 from kinematics import clamp
 import modern_robotics as mr
 from detection import find_block
@@ -54,6 +55,23 @@ class StateMachine():
         self.world_pos = np.empty((3,3))
         self.pick_size = -1
 
+        self.thermal_grid = [0] * 64
+        self.human_detected = False
+        self.paused_state = None
+        self.is_human_paused = False
+        self.inner_indices = [r * 8 + c for r in range(1, 7) for c in range(1, 7)]
+
+        self.node = rclpy.create_node('state_machine_thermal_sub')
+        self.thermal_sub = self.node.create_subscription(
+            Int8MultiArray,
+            '/thermal_binary_grid',
+            self.thermal_callback,
+            10
+        )
+
+        self.ros_thread = threading.Thread(target=rclpy.spin, args=(self.node,), daemon=True)
+        self.ros_thread.start()
+
     def set_next_state(self, state):
         """!
         @brief      Sets the next state.
@@ -75,41 +93,62 @@ class StateMachine():
 
         # IMPORTANT: This function runs in a loop. If you make a new state, it will be run every iteration.
         #            The function (and the state functions within) will continuously be called until the state changes.
+        active_states = {"execute", "play", "pick", "place", "locate", "detect"}
 
-        if self.next_state == "initialize_rxarm":
-            self.initialize_rxarm()
+        if self.human_detected and self.current_state in active_states:
+            if not self.is_human_paused:
+                self.paused_state = self.next_state   # remember where to return
+                self.is_human_paused = True
+            self.status_message = "⚠ HUMAN DETECTED — ARM PAUSED"
+            self.next_state = "idle"                  # hold in idle while blocked
+            self.current_state = "human_paused"
+            return                                    # skip all other state logic
 
-        if self.next_state == "idle":
-            self.idle()
-
-        if self.next_state == "estop":
-            self.estop()
-
-        if self.next_state == "execute":
-            self.execute()
-
-        if self.next_state == "calibrate":
-            self.calibrate()
-
-        if self.next_state == "detect":
-            self.detect()
-
-        if self.next_state == "manual":
-            self.manual()
-
-        if self.next_state == "record":
-            self.record()
+        elif self.is_human_paused and not self.human_detected:
+            # Human has cleared — resume
+            self.is_human_paused = False
         
-        if self.next_state == "play":
-            self.play()
+        else:
+            if self.paused_state:
+                self.next_state = self.paused_state
+                self.paused_state = None
+            if self.next_state == "initialize_rxarm":
+                self.initialize_rxarm()
 
-        if self.next_state == "pick":
-            self.pick()
+            if self.next_state == "idle":
+                self.idle()
 
-        if self.next_state == "place":
-            self.place()
-        if self.next_state == "locate":
-            self.get_location()
+            if self.next_state == "estop":
+                self.estop()
+
+            if self.next_state == "execute":
+                self.execute()
+
+            if self.next_state == "calibrate":
+                self.calibrate()
+
+            if self.next_state == "detect":
+                self.detect()
+
+            if self.next_state == "manual":
+                self.manual()
+
+            if self.next_state == "record":
+                self.record()
+            
+            if self.next_state == "play":
+                self.play()
+
+            if self.next_state == "human":
+                self.human()
+
+            if self.next_state == "pick":
+                self.pick()
+
+            if self.next_state == "place":
+                self.place()
+            if self.next_state == "locate":
+                self.get_location()
         
 
 
@@ -205,6 +244,32 @@ class StateMachine():
         if self.rxarm.estop:
             self.next_state = "estop"
         self.next_state = "idle"
+
+    def thermal_callback(self, msg):
+        self.thermal_grid = list(msg.data)
+        inner_hot = sum(self.thermal_grid[i] for i in self.inner_indices)
+        self.human_detected = inner_hot > 10
+
+    def human(self):
+        self.status_message = "State: Human - Scanning..."
+        self.current_state = "human"
+
+        inner_hot = sum(self.thermal_grid[i] for i in self.inner_indices)
+
+        grid_8x8 = [self.thermal_grid[r*8:(r+1)*8] for r in range(8)]
+        inner_only = [[grid_8x8[r][c] for c in range(1, 7)] for r in range(1, 7)]
+
+        if inner_hot > 10:
+            self.status_message = f"⚠ HUMAN DETECTED — {inner_hot}/36 inner pixels hot"
+            print(f"[HUMAN] Detected: {inner_hot}/36 inner pixels")
+            for row in inner_only:
+                print(' '.join('█' if cell else '·' for cell in row))
+        else:
+            self.status_message = f"Human state: Clear ({inner_hot}/36 pixels)"
+            print(f"[HUMAN] Clear: {inner_hot}/36 inner pixels")
+
+        self.next_state = "idle"
+
 
     def calMoveTime(self, target_joint):
         displacement = target_joint - self.rxarm.get_positions()
@@ -733,6 +798,7 @@ class StateMachineThread(QThread):
     @brief      Runs the state machine
     """
     updateStatusMessage = pyqtSignal(str)
+    updateHumanDetected = pyqtSignal(bool)   # ← add this line
     
     def __init__(self, state_machine, parent=None):
         """!
@@ -751,4 +817,5 @@ class StateMachineThread(QThread):
         while True:
             self.sm.run()
             self.updateStatusMessage.emit(self.sm.status_message)
+            self.updateHumanDetected.emit(self.sm.human_detected)
             time.sleep(0.05)
