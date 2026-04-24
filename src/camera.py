@@ -133,6 +133,7 @@ class Camera():
         # stores latest computed bin / buffer / drop regions
         self.bin_rectangles = {}
         self.model = load_model()
+        self.board_corners = None
     
     def get_block_xyz_from_click(self, click_uvd, size):
         """!
@@ -297,6 +298,8 @@ class Camera():
 
         if len(src_pts_list) !=4:
             return image
+
+        self.board_corners = src_pts_list
 
         src_arr = np.array(src_pts_list, dtype=DTYPE)
         dest_arr = np.array(dest_pts_list, dtype=DTYPE)

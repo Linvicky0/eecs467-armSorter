@@ -139,6 +139,7 @@ def detect_uniqueColors(frame, color, camera=None, u= None, v=None, selected = N
                     if inside < 0:
                         continue
 
+
                 center_x, center_y = rect[0]
 
                 # order the corners from increasing y
@@ -163,6 +164,15 @@ def detect_uniqueColors(frame, color, camera=None, u= None, v=None, selected = N
 
                 # 6. Extract Orientation Data
                 (x, y), (w, h), angle = rect
+                if (x + w) >= camera.board_corners[1][0] or x < camera.board_corners[0][0]:
+                    print("detection: x bounds failed")
+                    continue # x bounds check
+                if (y + h) >= camera.board_corners[2][1] or y < camera.board_corners[0][1]:
+                    print("detection: y bounds failed")
+                    continue # y bounds check
+
+
+
         
                 # 7. Visualization
                 # Draw the rotated box in Green
@@ -308,26 +318,26 @@ def detect_uniqueColors(frame, color, camera=None, u= None, v=None, selected = N
 # # --- Main Loop (for Webcam) ---
 # cap = cv2.VideoCapture(0)
 
-# while True:
-#    # ret, frame = cap.read()
-#     #if not ret: break
-#     image = cv2.imread('test3.png')
-#     if image is None:
-#         print("Error: could not find image")
+while True:
+   # ret, frame = cap.read()
+    #if not ret: break
+    image = cv2.imread('test3.png')
+    if image is None:
+        print("Error: could not find image")
 
-#     processed_frame, mask = detect_uniqueColors(image, 'orange')
-#     # found_color = find_block(image, 875, 359)
-#     # processed_frame, mask = detect_uniqueColors(image, found_color)
-#     # print(f"found color: {found_color}")
-
-
-
-#     cv2.imshow('Block Orientation', processed_frame)
-#     cv2.imshow('color mask', mask)
+    processed_frame, mask = detect_uniqueColors(image, 'orange')
+    # found_color = find_block(image, 875, 359)
+    # processed_frame, mask = detect_uniqueColors(image, found_color)
+    # print(f"found color: {found_color}")
 
 
-#     if cv2.waitKey(1) & 0xFF == ord('q'):
-#         break
 
-# #cap.release()
-# cv2.destroyAllWindows()
+    cv2.imshow('Block Orientation', processed_frame)
+    cv2.imshow('color mask', mask)
+
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+#cap.release()
+cv2.destroyAllWindows()
