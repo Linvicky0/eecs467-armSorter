@@ -46,8 +46,9 @@ def find_block(image, u, v):
     # search in a bounding region for this block's color
     # convert from rgb to hsv
     h_img, w_img = image.shape[:2]
-    y1, y2 = max(0, v-10), min(h_img, v+10)
-    x1, x2 = max(0, u-10), min(w_img, u+10)
+    offset = 20
+    y1, y2 = max(0, v-offset), min(h_img, v+offset)
+    x1, x2 = max(0, u-offset), min(w_img, u+offset)
     
     roi = image[y1:y2, x1:x2]
 
@@ -78,47 +79,163 @@ def find_block(image, u, v):
 
 
 
-def detect_uniqueColors(frame, color, camera=None, u= None, v=None):
-    # apply color masks
-    hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
-    if color == 'red':
-        mask1 = cv2.inRange(hsv, 
-                            np.array(hsv_ranges['red']['lower1']), 
-                            np.array(hsv_ranges['red']['upper1']))
-        mask2 = cv2.inRange(hsv,
-                            np.array(hsv_ranges['red']['lower2']), 
-                            np.array(hsv_ranges['red']['upper2']))
-        mask = cv2.bitwise_or(mask1, mask2)
-    else:
-        mask = cv2.inRange(hsv, hsv_ranges[color]['lower'], hsv_ranges[color]['upper'])
+def detect_uniqueColors(frame, color, camera=None, u= None, v=None, selected = None):
 
-
-    # Opening removes small noise; Closing fills small holes in the block
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-
-    # Exclude blocks already inside known bins
-    if camera is not None and hasattr(camera, "bin_rectangles") and len(camera.bin_rectangles) > 0:
-        # use "bin" for exact exclusion
-        # use "buffer" if you want a slightly larger safety region
-        bin_mask = camera.build_bin_mask(frame.shape, region="bin")
-        allowed_mask = cv2.bitwise_not(bin_mask)
-        mask = cv2.bitwise_and(mask, allowed_mask)
-
-    
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    # find the list of detected blocks
     detected = []
 
-    for cnt in contours:
-        # check that the pixel is inside the contour
-        is_inside = True
-        if u is not None and v is not None:
-            is_inside = cv2.pointPolygonTest(cnt, (float(u), float(v)), False)
+    if selected is not None:
+        for val in selected:
+            size, color, _ = val.split('_')    
+
+            hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+            if color == 'red':
+                mask1 = cv2.inRange(hsv, 
+                                    np.array(hsv_ranges['red']['lower1']), 
+                                    np.array(hsv_ranges['red']['upper1']))
+                mask2 = cv2.inRange(hsv,
+                                    np.array(hsv_ranges['red']['lower2']), 
+                                    np.array(hsv_ranges['red']['upper2']))
+                mask = cv2.bitwise_or(mask1, mask2)
+            else:
+                mask = cv2.inRange(hsv, hsv_ranges[color]['lower'], hsv_ranges[color]['upper'])
+
+
+            # Opening removes small noise; Closing fills small holes in the block
+            kernel = np.ones((5, 5), np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+            # Exclude blocks already inside known bins
+            if camera is not None and hasattr(camera, "bin_rectangles") and len(camera.bin_rectangles) > 0:
+                # use "bin" for exact exclusion
+                # use "buffer" if you want a slightly larger safety region
+                bin_mask = camera.build_bin_mask(frame.shape, region="bin")
+                allowed_mask = cv2.bitwise_not(bin_mask)
+                mask = cv2.bitwise_and(mask, allowed_mask)
+
             
-        if (is_inside):
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # if u is not None and v is not None and len(contours) == 0:
+            #     print("detect exiting")
+            #     return None
+            # find the list of detected blocks
+
+            for cnt in contours:
+                # check that the pixel is inside the contour
+
+                # filter out small noise by area
+                area = cv2.contourArea(cnt)
+                if area < 600:
+                    continue
+                    
+                # 5. Get the Minimum Area Rectangle (the "Oriented Bounding Box")
+                rect = cv2.minAreaRect(cnt)
+                box = cv2.boxPoints(rect)
+                box = np.array(box, dtype=int)
+
+                if u is not None and v is not None:
+                    inside = cv2.pointPolygonTest(box, (float(u), float(v)), False) 
+                    if inside < 0:
+                        continue
+
+                center_x, center_y = rect[0]
+
+                # order the corners from increasing y
+                sorted_indices = np.argsort(box[:, 1])
+                top_points = box[sorted_indices[2:]] # The two points with largest Y
+                p1, p2 = top_points[np.argsort(top_points[:, 0])]
+
+                # 3. Calculate Angle
+                dx = p2[0] - p1[0]
+                dy = p2[1] - p1[1]
+
+                # This gives angle in radians, convert to degrees
+                # Since we want 0 to be vertical (Y-axis), we use atan2(dx, dy)
+                angle_rad = math.atan2(dx, dy)
+                angle_deg = math.degrees(angle_rad)
+                if angle_deg <= 90:
+                    angle_deg = 90 - angle_deg
+                else:
+                    angle_deg = angle_deg - 90
+                    angle_deg = -angle_deg
+
+
+                # 6. Extract Orientation Data
+                (x, y), (w, h), angle = rect
+        
+                # 7. Visualization
+                # Draw the rotated box in Green
+                cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
+                
+                # Draw the angle text
+                cv2.putText(frame, f"Angle: {round(angle_deg, 2)}", (int(x), int(y) - 10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                # Line 2: Area (Below the center)
+                if area > 1100:
+                    if size == 'small':
+                        continue
+                    cv2.putText(frame, "big block", (int(x), int(y)+15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2) 
+                else :
+                    if (size == 'large'):
+                        continue
+                    cv2.putText(frame, "small block", (int(x), int(y)+15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2) 
+                
+                # cv2.putText(frame, f"pixel: {int(x)}, {int(y)}", (int(x), int(y) + 70), 
+                #     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2) 
+
+                object = {
+                    "angle": angle_deg,
+                    "center_x": int(center_x),
+                    "center_y": int(center_y),
+                    "color": color,
+                    "size": size
+                }
+
+
+
+                print("appending contour")
+                detected.append(object)
+            #   return detected
+                # return angle_deg, center_x, center_y
+    else:
+        hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+        if color == 'red':
+            mask1 = cv2.inRange(hsv, 
+                                np.array(hsv_ranges['red']['lower1']), 
+                                np.array(hsv_ranges['red']['upper1']))
+            mask2 = cv2.inRange(hsv,
+                                np.array(hsv_ranges['red']['lower2']), 
+                                np.array(hsv_ranges['red']['upper2']))
+            mask = cv2.bitwise_or(mask1, mask2)
+        else:
+            mask = cv2.inRange(hsv, hsv_ranges[color]['lower'], hsv_ranges[color]['upper'])
+
+
+        # Opening removes small noise; Closing fills small holes in the block
+        kernel = np.ones((5, 5), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+        # Exclude blocks already inside known bins
+        if camera is not None and hasattr(camera, "bin_rectangles") and len(camera.bin_rectangles) > 0:
+            # use "bin" for exact exclusion
+            # use "buffer" if you want a slightly larger safety region
+            bin_mask = camera.build_bin_mask(frame.shape, region="bin")
+            allowed_mask = cv2.bitwise_not(bin_mask)
+            mask = cv2.bitwise_and(mask, allowed_mask)
+
+        
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # if u is not None and v is not None and len(contours) == 0:
+        #     print("detect exiting")
+        #     return None
+        # find the list of detected blocks
+
+        for cnt in contours:
+            # check that the pixel is inside the contour
+
             # filter out small noise by area
             area = cv2.contourArea(cnt)
             if area < 500:
@@ -128,6 +245,11 @@ def detect_uniqueColors(frame, color, camera=None, u= None, v=None):
             rect = cv2.minAreaRect(cnt)
             box = cv2.boxPoints(rect)
             box = np.array(box, dtype=int)
+
+            if u is not None and v is not None:
+                inside = cv2.pointPolygonTest(box, (float(u), float(v)), False) 
+                if inside < 0:
+                    continue
 
             center_x, center_y = rect[0]
 
@@ -153,16 +275,7 @@ def detect_uniqueColors(frame, color, camera=None, u= None, v=None):
 
             # 6. Extract Orientation Data
             (x, y), (w, h), angle = rect
-            
-            # Adjust angle to be intuitive (OpenCV angles can be tricky)
-            #if w < h:
-            angle = angle
-            # else:
-
-           # angle = 90 + angle
-
-           # angle = angle % 90
-                
+    
             # 7. Visualization
             # Draw the rotated box in Green
             cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
@@ -181,14 +294,16 @@ def detect_uniqueColors(frame, color, camera=None, u= None, v=None):
 
             object = {
                 "angle": angle_deg,
-                "center_x": center_x,
-                "center_y": center_y
+                "center_x": int(center_x),
+                "center_y": int(center_y),
             }
-            
+
+
+            print("appending contour")
             detected.append(object)
-           # return angle_deg, center_x, center_y
+
     return detected
-    #return None, None, None
+#return None, None, None
 
 # # --- Main Loop (for Webcam) ---
 # cap = cv2.VideoCapture(0)
@@ -199,18 +314,18 @@ def detect_uniqueColors(frame, color, camera=None, u= None, v=None):
 #     image = cv2.imread('test3.png')
 #     if image is None:
 #         print("Error: could not find image")
-    
+
 #     processed_frame, mask = detect_uniqueColors(image, 'orange')
 #     # found_color = find_block(image, 875, 359)
 #     # processed_frame, mask = detect_uniqueColors(image, found_color)
 #     # print(f"found color: {found_color}")
 
 
-    
+
 #     cv2.imshow('Block Orientation', processed_frame)
 #     cv2.imshow('color mask', mask)
 
-    
+
 #     if cv2.waitKey(1) & 0xFF == ord('q'):
 #         break
 

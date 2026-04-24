@@ -358,7 +358,7 @@ class Gui(QMainWindow):
     def trackMouse(self, mouse_event):
         """!
         @brief      Show the mouse position in GUI
-
+o
                     TODO: after implementing workspace calibration display the world coordinates the mouse points to in the RGB
                     video image.
 
@@ -418,14 +418,88 @@ class Gui(QMainWindow):
     
     def startSorting(self):
         selected = self.getSelectedBlocks()
+        if len(selected) == 0:
+            self.ui.rdoutStatus.setText("no targets selected")
+            return
+
+        self.ui.rdoutStatus.setText(f"Sorting {len(selected)} classes...")
+        targets = self.camera.get_target_locs(selected)
+        
+        if len(targets) == 0:
+            print("returning from startSorting")
+
+        self.rxarm.arm.go_to_home_pose(moving_time=2,
+                                        accel_time=0.5,
+                                        blocking=True)
+        # assume blocks don't move after capturing once
+        for target in targets:
+            print("returning from startSorting...")
+            target_world_pos = target['target_world_pos']
+            success = self.sm.auto_pick(target_world_pos, target["ori"], target["rad"])
+
+            if (success):
+                print("pick successfl on target", target)
+                if 'bin1' in self.camera.bin_rectangles:
+                    bin1 = self.camera.bin_rectangles['bin1']
+                    target_world_pos = [0,0,0]
+                    target_world_pos[0] = bin1['center'][0]
+                    target_world_pos[1] = bin1['center'][1]
+                #   target_world_pos[2] = height
+                    target_world_pos[2] = 0
+                    self.sm.auto_place(target_world_pos)
+                else:
+                    self.rxarm.gripper_release()
+
+    def startSorting2(self):
+        selected = self.getSelectedBlocks()
 
         if len(selected) == 0:
             self.ui.rdoutStatus.setText("No targets selected")
             return
 
         self.ui.rdoutStatus.setText(f"Sorting {len(selected)} classes...")
+        
+    
+        
+        #while True:
+        objects = self.camera.get_target_ori(selected) # TODO: edit this code to run in autonomous node, pass selected_types to camera()
+            # if res is None:
+            #     print("sorting done!!, selected: ", selected)
+            #     return
+        if len(objects) > 0:
 
-        self.camera.run_autonomous(selected) # TODO: edit this code to run in autonomous node, pass selected_types to camera()
+            self.rxarm.arm.go_to_home_pose(moving_time=2,
+                                        accel_time=0.5,
+                                        blocking=True)
+            
+            for val in objects:
+                target_world_pos, block_ori, rad = val
+                print("in sort")
+                print("target world pos: ", target_world_pos)
+        
+                success = self.sm.auto_pick(target_world_pos, block_ori, rad)
+                print("returning from startSorting...")
+                if (success):
+                    if 'bin1' in self.camera.bin_rectangles:
+                        bin1 = self.camera.bin_rectangles['bin1']
+                        target_world_pos = [0,0,0]
+                        target_world_pos[0] = bin1['center'][0]
+                        target_world_pos[1] = bin1['center'][1]
+                    #   target_world_pos[2] = height
+                        target_world_pos[2] = 0
+                        self.sm.auto_place(target_world_pos)
+                    else:
+                        self.rxarm.gripper_release()
+            # return
+        else: 
+            return
+            
+
+
+
+
+
+            
 
 
 ### TODO: Add ability to parse POX config file as well

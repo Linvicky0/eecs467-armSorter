@@ -23,7 +23,7 @@ from pathlib import Path
 import pyrealsense2 as rs
 # import scipy.ndimage as ndimage
 import math
-from detection import detect_uniqueColors
+from detection import detect_uniqueColors, find_block
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -59,7 +59,7 @@ class Camera():
         self.DepthFrameRGB = np.zeros((720,1280, 3)).astype(np.uint8)
         self.TagDepthFrame = None
         self.comparison = None
-
+        self.target_pick_coord = None
         # mouse clicks & calibration variables
         self.camera_calibrated = False
         self.intrinsic_matrix = None
@@ -114,7 +114,7 @@ class Camera():
                 "buffer_pad_width": 20.0,
                 "drop_length": 170.0,
                 "drop_width": 110.0,
-                "drop_offset": [0.0, 0.0, 0.0],
+                "drop_offset": [0.0, 0.0, 150],
                 "tag_to_bin_center": 130.0
             },
             "bin2": {
@@ -125,7 +125,7 @@ class Camera():
                 "buffer_pad_width": 20.0,
                 "drop_length": 170.0,
                 "drop_width": 110.0,
-                "drop_offset": [0.0, 0.0, 0.0],
+                "drop_offset": [0.0, 0.0, 150],
                 "tag_to_bin_center": 130.0
             }
         }
@@ -133,19 +133,132 @@ class Camera():
         # stores latest computed bin / buffer / drop regions
         self.bin_rectangles = {}
         self.model = load_model()
+    
+    def get_block_xyz_from_click(self, click_uvd, size):
+        """!
+        @brief      Converts the clicked uvd (pixel + depth) to world coordinates.
+        """
+        u, v, z = click_uvd[0], click_uvd[1], click_uvd[2]
+        
+        # Use the function we just added to your Camera class!
+        #world_pos = self.camera.coord_pixel_to_world(u, v, z)
+        world_pos = self.pixel_to_World(u,v,z, size, True)
+        print("here1")
 
-    def run_autonomous(self, selected_blocks):
-        while True:
-            img_bgr = cv2.cvtColor(self.VideoFrame, cv2.COLOR_RGB2BGR)
-            blocks = find_target_blocks(self.model, img_bgr, selected_blocks)
-            if len(blocks) == 0:
-                return
-            block = next(iter(blocks))[0]
-            print(block)
-            color = block["label"].split('_')[1]
-            frame, mask = detect_uniqueColors(self.VideoFrame, color)
-            print("center:", color['center'], "label:", color['label'])
-            return
+        # To get the true orientation, you'd cross-reference this click with 
+        # self.camera.block_detections. For now, we will default to 0.0 rad.
+        block_ori = 0.0 
+  
+        
+        return world_pos, block_ori
+    
+    def pick_coordinate(self, coord):
+        '''Coord is (x, y, z)'''
+        target_world_pos, block_ori = self.get_block_xyz_from_click(coord)
+        if target_world_pos is None:
+            return False
+        print("find block color")
+        color = find_block(self.VideoFrame, coord[0], coord[1])
+        if color is None:
+            angle = 0
+        else:
+            print(f"detect block at {coord[0]}, {coord[1]}")
+            objects = detect_uniqueColors(self.VideoFrame, color, coord[0], coord[1])
+            object = objects[0]
+
+
+            if len(objects) ==0 :
+                print("angle of block not found")
+                angle = 0
+                center_x = coord[0]
+                center_y = coord[1]
+            else:
+                angle = object['angle']
+                center_x = object['center_x']
+                center_y = object['center_y']
+                
+            center_pos = self.pixel_to_World(center_x, center_y, coord[2], True)
+
+            if center_pos[0] > 10:
+                target_world_pos[0] = center_pos[0] - 10
+                target_world_pos[1] = center_pos[1] + 10
+            else:
+                target_world_pos[0] = center_pos[0] + 10
+            print(f"center {center_pos[0]} {center_pos[1] - 10}")
+
+            if center_pos[1] < 0:
+                target_world_pos[1] += 10
+        
+        rad = math.radians(angle)
+        return target_world_pos, block_ori, rad
+
+    def get_target_locs(self, selected_blocks):
+        if self.DepthFrameRaw is None:
+            return []
+        
+        blocks_list = detect_uniqueColors(self.VideoFrame, None, selected=selected_blocks)
+        for idx, block in enumerate(blocks_list):
+            # get the object coord along with depth to perform auto_pick
+            x = block["center_x"]
+            y = block["center_y"]
+            blocks_list[idx]['rad'] = math.radians(block['angle'])
+            z = self.DepthFrameRaw[y][x]
+            blocks_list[idx]['depth'] = z
+            coord = [x, y, z]
+            target_world_pos, ori = self.get_block_xyz_from_click(coord, block['size'])
+            blocks_list[idx]['target_world_pos'] = target_world_pos
+            blocks_list[idx]['ori'] = ori
+            
+        return blocks_list
+
+
+    def get_target_ori(self, selected_blocks):
+        objects = []
+
+        if self.DepthFrameRaw is None:
+            return objects
+     
+        img_bgr = cv2.cvtColor(self.VideoFrame, cv2.COLOR_RGB2BGR)
+        #blocks = find_target_blocks(self.model, img_bgr, selected_blocks)
+        blocks = detect_uniqueColors(self.VideoFrame, None, selected= selected_blocks)
+
+
+        if len(blocks) == 0:
+            # self.target_pick_coord = None
+            return objects
+        # iterate through the detected classes
+        #for label, val_list in blocks.items():
+        for val in blocks:
+            #  for block in val_list:
+            #    color = label.split('_')[1]
+            #    res = detect_uniqueColors(self.VideoFrame, color, block['center'][0], block['center'][1])
+            #    if len(res) > 0:
+            x = val['center_x']
+            y = val['center_y']
+            angle = val['angle']
+            rad = math.radians(angle)
+
+            size = val['size']
+                    #   print("center:", block['center'], "label:", label)
+                    
+                    #  object_pose = res[0] # dict of angle, center_x, center_y
+                    # get the coord with depth
+            print("object pose: ", val)
+                    #   x = object_pose['center_x']
+                #    y = object_pose['center_y']
+
+            coord = [x, y, self.DepthFrameRaw[y][x]]
+            print("pick coord:", coord)
+            target_world_pos, ori = self.get_block_xyz_from_click(coord, size)
+            objects.append[target_world_pos, ori, angle]
+
+            # self.target_pick_coord = [x, y]
+                    #   return self.pick_coordinate(coord)
+        # self.target_pick_coord = None
+        return objects
+
+           
+            
 
 
     def Homography_Transform(self, image):
@@ -240,8 +353,12 @@ class Camera():
         
         return px, py
 
-    def round_to_blocksize(self, height):
-        return round(height/self.blocksize)*self.blocksize
+    def round_to_blocksize(self, height, size):
+        if size == 'small':
+            return round(height/20)*20
+        else:
+            return round(height/self.blocksize)*self.blocksize
+
 
 
     def world_to_pixel(self, world_x, world_y, world_z=0):
@@ -523,7 +640,7 @@ class Camera():
 
 
 
-    def coord_pixel_to_world(self, u, v, d, do_print):
+    def coord_pixel_to_world(self, u, v, d, do_print, size):
         '''
         Convert pixel coordinates (from camera frame) to world coordinates
         u: pixel x coordinate
@@ -577,7 +694,7 @@ class Camera():
         world_pos = np.matmul(extrinsic_matrix_inv, temp_pos)
 
         pos = world_pos.flatten()[:3]
-        pos[2] = self.round_to_blocksize(pos[2])
+        pos[2] = self.round_to_blocksize(pos[2], size)
        # print(f"worldX: {pos[0]}, worldY: {pos[1]}, worldZ: {pos[2]}")     
 
         return pos
@@ -585,7 +702,7 @@ class Camera():
     
 
 
-    def pixel_to_World(self, u, v,d, do_print):
+    def pixel_to_World(self, u, v,d, do_print, size=None):
         """Convert Pixel coordinates to World using extrinsic matrix """
         if self.extrinsic_matrix is None: 
             if do_print:
@@ -617,7 +734,7 @@ class Camera():
 
         
         # use the camera pinhole model to get height z
-        pos = self.coord_pixel_to_world(u, v, d, do_print)
+        pos = self.coord_pixel_to_world(u, v, d, do_print, size)
         if pos is None:
             return
         
@@ -1246,6 +1363,16 @@ class ImageListener(Node):
 
        # self.camera.VideoFrame = self.camera.Homography_Transform(cv_image)
         self.camera.VideoFrame = cv_image
+
+        pick_coord = self.camera.target_pick_coord
+        if pick_coord:
+            radius = 10  # Adjust as needed
+            color = (0, 0, 255)  # Red in BGR format
+            thickness = 2
+            cv2.circle(self.camera.VideoFrame, (pick_coord[0], pick_coord[1]), radius, color, thickness)
+            # Optional: Add label text
+            cv2.putText(self.camera.VideoFrame, "pick target", (pick_coord[0] - 20, pick_coord[1] - 10), 
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
 
 class TagDetectionListener(Node):

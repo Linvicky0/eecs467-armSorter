@@ -78,7 +78,7 @@ def find_target_blocks(model, image, target_blocks):
             y2 = int(bbox[3])
             center = int((x1 + x2) / 2), int((y1 + y2) / 2)
             if class_name in found_blocks:
-                found_blocks[class_name].append({"confidence": confidence, "center": center, "label": class_name})
+                found_blocks[class_name].append({"confidence": confidence, "center": center})
             else:
-                found_blocks[class_name] = [{"confidence": confidence, "center": center, "label": class_name}]
+                found_blocks[class_name] = [{"confidence": confidence, "center": center}]
     return found_blocks

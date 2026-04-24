@@ -434,7 +434,7 @@ class StateMachine():
 
         if (target_world_pos[2] < 10): # height too low
             print("selected oject height too close to ground, auto-pick exits")
-            return
+            return False
         
         ############ Planning #############
         # print("[PICK] Planning waypoints...")
@@ -464,7 +464,7 @@ class StateMachine():
         
         if not reachable_low:
             print("final EE pose is not reachable")
-            return
+            return False
 
 
 
@@ -525,7 +525,7 @@ class StateMachine():
                                                                             execute = True)
         if valid is False:
             print("failed to descend arm")
-            return
+            return False
         
         print(f"joint angles from path: {joint_angles_2}")
      
@@ -550,7 +550,17 @@ class StateMachine():
                                                                               execute = True)
 
         self.rxarm.gripper_grasp()
-        return
+
+        height = (((target_world_pos[2]+100)/1000)+descend_offset)
+        joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
+                                                                              y=-target_world_pos[0]/1000, # motor's x axis is flipped
+                                                                              z=height, # position converted to meters
+                                                                              pitch = phi,
+                                                                              roll = EE_angle,
+                                                                              execute = True)
+
+
+        return True
             
      
 
@@ -583,34 +593,35 @@ class StateMachine():
 
         target_world_pos = copy.deepcopy(_target_world_pos)
         above_world_pos = copy.deepcopy(_target_world_pos)
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!! pick pos:", target_world_pos)
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!! drop pos:", target_world_pos)
 
         
         ############ Planning #############
         # print("[Place] Planning waypoints...")
-        height_offset = 200     # add height to avoid hitting other obstacles along the path
-        target_world_pos[2] = target_world_pos[2]  + height_offset
+       # height_offset = 150/1000     # add height to avoid hitting other obstacles along the path
+       # target_world_pos[2] = target_world_pos[2]  
 
         # EE descends to grab the object
-        drop_height_offset = 50     # arm will drop the block with respect of this height from the chosen bin
-        descend_offset = (-height_offset+drop_height_offset)/1000  
+        #drop_height_offset = 70     # arm will drop the block with respect of this height from the chosen bin
+       # descend_offset = (-height_offset+drop_height_offset)/1000  
         print("EE descending")
         joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
                                                                               y=-target_world_pos[0]/1000, # motor's x axis is flipped
-                                                                              z=(target_world_pos[2]/1000)+descend_offset, # position converted to meters
+                                                                              z=((target_world_pos[2]/1000) +  self.camera.bin_definitions['bin1']['drop_offset'][2]/1000),# position converted to meters
                                                                               pitch = phi,
-                                                                              moving_time = 3,
-                                                                              execute = True)
+                                                                            #  moving_time =3,
+                                                                              execute = True,
+                                                                              blocking = True)
 
         # Try vertical reach with phi = pi/2
         # this function computes the path to get to the final EE and execute it if its valid
-        joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
-                                                                              y=-target_world_pos[0]/1000, # motor's x axis is flipped
-                                                                              z=target_world_pos[2]/1000, # position converted to meters
-                                                                              pitch = phi,
-                                                                              execute = True)
-
-         
+        # joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
+        #                                                                       y=-target_world_pos[0]/1000, # motor's x axis is flipped
+        #                                                                       z=target_world_pos[2]/1000, # position converted to meters
+        #                                                                       pitch = phi,
+        #                                                                       execute = True,
+        #                                                                       blocking = True)
+      
 
         self.rxarm.gripper_release()
         return
