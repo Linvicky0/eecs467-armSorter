@@ -101,8 +101,6 @@ class Camera():
         self.H = None
         self.H_inv = None
 
-        # maximum depth from camera to board, used for calculating z
-        self.max_depth = None
 
         # bin configurataion 
         self.bin_definitions = {
@@ -143,7 +141,7 @@ class Camera():
         
         # Use the function we just added to your Camera class!
         #world_pos = self.camera.coord_pixel_to_world(u, v, z)
-        world_pos = self.pixel_to_World(u,v,z, size, True)
+        world_pos = self.pixel_to_World(u,v,z, True, size)
         print("here1")
 
         # To get the true orientation, you'd cross-reference this click with 
@@ -164,7 +162,7 @@ class Camera():
             angle = 0
         else:
             print(f"detect block at {coord[0]}, {coord[1]}")
-            objects = detect_uniqueColors(self.VideoFrame, color, coord[0], coord[1])
+            objects = detect_uniqueColors(self.VideoFrame, color, self, coord[0], coord[1])
             object = objects[0]
 
 
@@ -197,11 +195,12 @@ class Camera():
         if self.DepthFrameRaw is None:
             return []
         
-        blocks_list = detect_uniqueColors(self.VideoFrame, None, selected=selected_blocks)
+        blocks_list = detect_uniqueColors(self.VideoFrame, None, self, selected=selected_blocks)
         for idx, block in enumerate(blocks_list):
             # get the object coord along with depth to perform auto_pick
             x = block["center_x"]
             y = block["center_y"]
+            print("size", {block['size']})
             blocks_list[idx]['rad'] = math.radians(block['angle'])
             z = self.DepthFrameRaw[y][x]
             blocks_list[idx]['depth'] = z
@@ -221,7 +220,7 @@ class Camera():
      
         img_bgr = cv2.cvtColor(self.VideoFrame, cv2.COLOR_RGB2BGR)
         #blocks = find_target_blocks(self.model, img_bgr, selected_blocks)
-        blocks = detect_uniqueColors(self.VideoFrame, None, selected= selected_blocks)
+        blocks = detect_uniqueColors(self.VideoFrame, None, self, selected= selected_blocks)
 
 
         if len(blocks) == 0:
@@ -260,6 +259,29 @@ class Camera():
 
            
             
+    def find_corners(self):
+        
+        # use world coordiantes of board's corners
+        world_corners = {
+           'topleft': [-500, 475],
+           'topright': [500, 475],
+           'bottomleft': [-500, -175],
+           'bottomright': [500, -175]
+        }
+
+        ordered_keys = ['topleft', 'topright', 'bottomleft', 'bottomright']
+        src_pts_list = []
+
+        for key in ordered_keys:
+            src_world_x = world_corners[key][0]
+            src_world_y = world_corners[key][1]
+            src_pts_list.append(self.world_to_pixel(src_world_x, src_world_y))
+
+        if len(src_pts_list) !=4:
+            return 
+
+        self.board_corners = src_pts_list
+
 
 
     def Homography_Transform(self, image):
@@ -358,7 +380,7 @@ class Camera():
 
     def round_to_blocksize(self, height, size):
         if size == 'small':
-            return round(height/20)*20
+            return round(height/30)*30
         else:
             return round(height/self.blocksize)*self.blocksize
 
@@ -601,44 +623,6 @@ class Camera():
         self.GridFrame = modified_image
 
 
-
-    def get_maxDepth(self):
-        if (self.extrinsic_matrix is None):
-            return
-
-        
-        # get the pixel coordinates of April Tag
-        tag_world = np.array([
-            [-250,  275, 0, 1],  # Tag 4
-            [ 250,  275, 0, 1],  # Tag 3
-            [-250, -25,  0, 1],  # Tag 1
-            [ 250, -25,  0, 1]   # Tag 2
-        ]).T # Transpose to (4, 4) for matrix math
-
-        # 2. Project World -> Camera Frame -> Pixel Space
-        # This uses the current extrinsic_matrix, so it updates as the camera moves!
-        cam_corners = self.extrinsic_matrix @ tag_world
-        pixel_corners_h = self.intrinsic_matrix @ cam_corners[0:3, :]
-        
-        # 3. Divide by Z to get final (u, v) pixels
-        # Using a small epsilon to prevent division by zero
-        z_coords = np.maximum(pixel_corners_h[2, :], 1e-5)
-        u_corners = pixel_corners_h[0, :] / z_coords
-        v_corners = pixel_corners_h[1, :] / z_coords
-
-        # 4. Save these as your src_pts for Homography
-        # We stack them into a (4, 2) array of float32
-        tag_pixels = np.vstack((u_corners, v_corners)).T.astype(np.float32)
-        max_depth =0
-        for pt in tag_pixels:
-            u,v = pt
-            u_int = int(u)
-            v_int = int(v)
-            if (self.DepthFrameRaw[v_int][u_int] > max_depth):
-                max_depth = self.DepthFrameRaw[v_int][u_int]
-        
-        self.max_depth = max_depth
-        print(f"Max depth: {max_depth}")
 
 
 
@@ -967,7 +951,7 @@ class Camera():
         if d is None:
             return None
 
-        return self.pixel_to_World(cx, cy, d, False)
+        return self.pixel_to_World(cx, cy, d, False, None)
 
 
     def get_tag_bottom_edge_world(self, detection):
@@ -1094,6 +1078,7 @@ class Camera():
 
         Priority:
           1) two visible tags
+
           2) one visible tag using the bottom border of the tag
         """
         self.bin_rectangles = {}
@@ -1402,6 +1387,10 @@ class TagDetectionListener(Node):
                 if self.camera.extrinsic_matrix is None: 
                     self.camera.solve_extrinsic()
 
+                if self.camera.extrinsic_matrix is not None:
+                    if self.camera.board_corners is None:
+                        self.camera.find_corners()
+
                 self.camera.find_bin_rectangles_from_tags()
 
             self.camera.drawTagsInRGBImage(msg)
@@ -1446,8 +1435,6 @@ class DepthListener(Node):
         # CASTROPHIC TO APPLY HOMOGRAPHY ON DEPTH FRAME
         #self.camera.DepthFrameRaw = self.camera.Homography_Transform(cv_depth)
         self.camera.DepthFrameRaw = cv_depth
-        if (self.camera.max_depth is None):
-            self.camera.get_maxDepth()
             
         # self.camera.DepthFrameRaw = self.camera.DepthFrameRaw / 2
         self.camera.ColorizeDepthFrame()

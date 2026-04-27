@@ -18,7 +18,7 @@ hsv_ranges = {
     },
     'orange': {
         'lower': (6, 100, 100),
-        'upper': (15,255,255)
+        'upper': (20,255,255)
     },
     'yellow': {
         'lower': (20,80,80),
@@ -126,7 +126,7 @@ def detect_uniqueColors(frame, color, camera=None, u= None, v=None, selected = N
 
                 # filter out small noise by area
                 area = cv2.contourArea(cnt)
-                if area < 600:
+                if area < 400:
                     continue
                     
                 # 5. Get the Minimum Area Rectangle (the "Oriented Bounding Box")
@@ -164,25 +164,26 @@ def detect_uniqueColors(frame, color, camera=None, u= None, v=None, selected = N
 
                 # 6. Extract Orientation Data
                 (x, y), (w, h), angle = rect
-                if (x + w) >= camera.board_corners[1][0] or x < camera.board_corners[0][0]:
-                    print("detection: x bounds failed")
-                    continue # x bounds check
-                if (y + h) >= camera.board_corners[2][1] or y < camera.board_corners[0][1]:
-                    print("detection: y bounds failed")
-                    continue # y bounds check
+                if camera.board_corners is not None:
+                
+                    print("left" , camera.board_corners[0])
+                    print("right" , camera.board_corners[1])
+                    print("bottom left" , camera.board_corners[2])
+                    print("bottom right" , camera.board_corners[3])
+
+                    if (x + w) >= camera.board_corners[1][0] or x < camera.board_corners[0][0]:
+                        print("detection: x bounds failed")
+                        continue # x bounds check
+                    if (y + h) >= camera.board_corners[2][1] or y < camera.board_corners[0][1]:
+                        print("detection: y bounds failed")
+                        continue # y bounds check
 
 
 
         
-                # 7. Visualization
-                # Draw the rotated box in Green
-                cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
-                
-                # Draw the angle text
-                cv2.putText(frame, f"Angle: {round(angle_deg, 2)}", (int(x), int(y) - 10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
                 # Line 2: Area (Below the center)
-                if area > 1100:
+                if area > 1000:
                     if size == 'small':
                         continue
                     cv2.putText(frame, "big block", (int(x), int(y)+15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2) 
@@ -193,6 +194,15 @@ def detect_uniqueColors(frame, color, camera=None, u= None, v=None, selected = N
                 
                 # cv2.putText(frame, f"pixel: {int(x)}, {int(y)}", (int(x), int(y) + 70), 
                 #     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2) 
+
+                # 7. Visualization
+                # Draw the rotated box in Green
+                cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
+                
+                # Draw the angle text
+                cv2.putText(frame, f"Angle: {round(angle_deg, 2)}", (int(x), int(y) - 10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                
 
                 object = {
                     "angle": angle_deg,
@@ -318,26 +328,3 @@ def detect_uniqueColors(frame, color, camera=None, u= None, v=None, selected = N
 # # --- Main Loop (for Webcam) ---
 # cap = cv2.VideoCapture(0)
 
-while True:
-   # ret, frame = cap.read()
-    #if not ret: break
-    image = cv2.imread('test3.png')
-    if image is None:
-        print("Error: could not find image")
-
-    processed_frame, mask = detect_uniqueColors(image, 'orange')
-    # found_color = find_block(image, 875, 359)
-    # processed_frame, mask = detect_uniqueColors(image, found_color)
-    # print(f"found color: {found_color}")
-
-
-
-    cv2.imshow('Block Orientation', processed_frame)
-    cv2.imshow('color mask', mask)
-
-
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-#cap.release()
-cv2.destroyAllWindows()

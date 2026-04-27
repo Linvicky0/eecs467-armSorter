@@ -383,7 +383,7 @@ class StateMachine():
             angle =0
         else:
             print("detect block")
-            objects = detect_uniqueColors(self.camera.VideoFrame, color, pt[0], pt[1])
+            objects = detect_uniqueColors(self.camera.VideoFrame, color, None,  pt[0], pt[1])
             object = objects[0]
             angle = object['angle']
             center_x = object['center_x']
@@ -413,12 +413,144 @@ class StateMachine():
                                     blocking=True)
         self.status_message = "State: Pick - Click to pick"
         self.current_state = "pick"
-        self.auto_pick(target_world_pos, block_ori, rad)
+        self.auto_pick1(target_world_pos, block_ori, rad)
         # if self.rxarm.estop:
         #     self.next_state = "estop"
         self.next_state = "idle"
 
 
+
+    def auto_pick1(self, _target_world_pos, block_ori, angle, phi=np.pi/2, double_check=False, to_sky=False):
+
+        
+        target_world_pos = copy.deepcopy(_target_world_pos)
+        above_world_pos = copy.deepcopy(_target_world_pos)
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!! pick pos:", target_world_pos)
+        print("angle of object:" , angle)
+        xy_norm = np.linalg.norm(target_world_pos[:2])
+        print(xy_norm)
+        if xy_norm >= 315 and xy_norm<=430:
+            target_world_pos[2] = target_world_pos[2] + 1/55 * xy_norm
+            print(1/50 * xy_norm)
+
+        if (target_world_pos[2] < 10): # height too low
+            print("selected oject height too close to ground, auto-pick exits")
+            return
+        
+        ############ Planning #############
+        # print("[PICK] Planning waypoints...")
+        pick_stable = True
+
+        # determine if final pose is reachable, exit if not
+        current_joints = self.rxarm.arm.get_joint_commands()
+
+
+        
+        joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
+                                                                            y=-target_world_pos[0]/1000, # motor's x axis is flipped
+                                                                            z=((target_world_pos[2]/1000)), # position converted to meters
+                                                                            pitch = phi,
+                                                                            moving_time = 4,
+                                                                            execute = False)
+        
+        pick_height_offset = 0
+        if target_world_pos[2] > 100:
+            pick_height_offset = 40  # smaller height offset in case the goal becomes unreachable
+        else:
+            pick_height_offset = 100    
+
+        target_world_pos[2] = target_world_pos[2]  + pick_height_offset
+
+
+
+        
+        
+        if not reachable_low:
+            print("final EE pose is not reachable")
+            return
+
+
+
+
+
+        # Define how long the move takes and how many waypoints to check
+        time_in_seconds = 4.0
+        number_of_waypoints = 100 # Higher number = finer resolution for obstacle checking
+
+        #  generates a path to final destination
+        trajectory = mr.JointTrajectory(current_joints, joint_angles_2, time_in_seconds, number_of_waypoints, 3)
+
+        
+
+       # reachable_low, reachable_high = False, False
+
+        # Try vertical reach with phi = pi/2
+        # this function computes the path to get to the final EE and execute it if its valid
+        # joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
+        #                                                                       y=-target_world_pos[0]/1000, # motor's x axis is flipped
+        #                                                                       z=(target_world_pos[2])/1000, # position converted to meters
+        #                                                                       pitch = phi,
+        #                                                                       moving_time =2,
+        #                                                                       blocking= True,
+        #                                                                       execute = True)
+    
+        for angles in trajectory:
+            self.rxarm.set_positions(angles)
+            
+
+        # TODO: inside this function, check if there's obstacles. if so, don't execute the motor command
+        # success = self.rxarm.arm.set_ee_cartesian_trajectory(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
+        #                                             y=-target_world_pos[0]/1000, # motor's x axis is flipped
+        #                                             z=(target_world_pos[2])/1000, # position converted to meters
+        #                                             pitch = phi,
+        #                                             moving_time =2)
+
+        # if success is False:
+        #     print("path to goal failed in autopick")
+        #     return
+        
+
+        # EE descends to grab the object
+        descend_offset = (-pick_height_offset)/1000  
+        print("EE descending")        
+
+        # TODO: orient the wrist to align with object orientation before grasping
+        joint_angles_2, valid = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
+                                                                            y=-target_world_pos[0]/1000, # motor's x axis is flipped
+                                                                            z=((target_world_pos[2]/1000)), # position converted to meters
+                                                                            pitch = phi,
+                                                                            moving_time = 4,
+                                                                            execute = False)
+        if valid is False:
+            print("failed to descend arm")
+            return
+        
+        print(f"joint angles from path: {joint_angles_2}")
+     
+        joint_angles_2[-1] = joint_angles_2[0] + angle # parallel to x axis
+        print(f"joint angle base: {joint_angles_2[0]}")
+
+
+
+        # orient the wrist before descend
+        self.rxarm.arm._publish_commands(joint_angles_2, moving_time=2, accel_time=0, blocking=True)
+
+
+        #TODO: check for obstacle before descending
+        # maintain the orientation while descending
+
+        
+        joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
+                                                                              y=-target_world_pos[0]/1000, # motor's x axis is flipped
+                                                                              z=((target_world_pos[2]/1000)+descend_offset), # position converted to meters
+                                                                              pitch = phi,
+                                                                              roll = joint_angles_2[-1],
+                                                                              moving_time = 4,
+                                                                              execute = True)
+
+        self.rxarm.gripper_grasp()
+        return
+            
     def auto_pick(self, _target_world_pos, block_ori, angle, phi=np.pi/2, double_check=False, to_sky=False):
 
         
@@ -582,12 +714,48 @@ class StateMachine():
         if (target_world_pos is None):
             return
 
-        self.auto_place(target_world_pos, block_ori)
+        self.auto_place1(target_world_pos, block_ori)
 
         # if self.rxarm.estop:
         #     self.next_state = "estop"
         self.next_state = "idle"
 
+
+    def auto_place1(self, _target_world_pos, block_ori=None, phi=np.pi/2, place_near=False, to_sky=False):
+
+        target_world_pos = copy.deepcopy(_target_world_pos)
+        above_world_pos = copy.deepcopy(_target_world_pos)
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!! pick pos:", target_world_pos)
+
+        
+        ############ Planning #############
+        # print("[Place] Planning waypoints...")
+        height_offset = 200     # add height to avoid hitting other obstacles along the path
+        target_world_pos[2] = target_world_pos[2]  + height_offset
+
+        # EE descends to grab the object
+        drop_height_offset = 50     # arm will drop the block with respect of this height from the chosen bin
+        descend_offset = (-height_offset+drop_height_offset)/1000  
+        print("EE descending")
+        joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
+                                                                              y=-target_world_pos[0]/1000, # motor's x axis is flipped
+                                                                              z=(target_world_pos[2]/1000)+descend_offset, # position converted to meters
+                                                                              pitch = phi,
+                                                                              moving_time = 3,
+                                                                              execute = True)
+
+        # Try vertical reach with phi = pi/2
+        # this function computes the path to get to the final EE and execute it if its valid
+        joint_angles_2, reachable_low = self.rxarm.arm.set_ee_pose_components(x=target_world_pos[1]/1000, # (x,y) plane of robot and world frame is rotated
+                                                                              y=-target_world_pos[0]/1000, # motor's x axis is flipped
+                                                                              z=target_world_pos[2]/1000, # position converted to meters
+                                                                              pitch = phi,
+                                                                              execute = True)
+
+         
+
+        self.rxarm.gripper_release()
+        return
 
     def auto_place(self, _target_world_pos, block_ori=None, phi=np.pi/2, place_near=False, to_sky=False):
 
@@ -627,173 +795,8 @@ class StateMachine():
         return
       
      
-    def auto_place_notouch(self, _target_world_pos, block_ori=None, phi=np.pi/2, place_near=False, to_sky=False, push=[0,175,0]):
-        target_world_pos = copy.deepcopy(_target_world_pos)
-        above_world_pos = copy.deepcopy(_target_world_pos)
-        push_pos = copy.deepcopy(push)
-        if place_near:
-            target_world_pos = [0, 200, 0]
-            above_world_pos = [0, 200, 0]
+   
 
-        ############ Planning #############
-        # print("[PLACE]  Planning waypoints...")
-        place_height_offset = 33
-        place_wrist_offset = np.pi/18.0/3.0
-        target_world_pos[2] = target_world_pos[2] + place_height_offset
-        above_world_pos[2] = above_world_pos[2] + place_height_offset + 80
-        push_pos[2] = push_pos[2] + place_height_offset
-
-        reachable_low, reachable_high = False, False
-
-        # Try vertical reach with phi = pi/2
-        reachable_low, joint_angles_2 = IK_geometric([target_world_pos[0], 
-                                                    target_world_pos[1],
-                                                    target_world_pos[2],
-                                                    phi])
-
-        if reachable_low:
-            # phi = np.pi/2
-            while not reachable_high:
-                reachable_high, joint_angles_1 = IK_geometric([above_world_pos[0], 
-                                                            above_world_pos[1],
-                                                            above_world_pos[2],
-                                                            phi])
-                if reachable_high:
-                    break
-                if above_world_pos[2] - target_world_pos[2] > 40:
-                    above_world_pos[2] = above_world_pos[2] - 10
-                elif _target_world_pos[2] < 38*4+10:
-                    if 0.98* math.sqrt(above_world_pos[0] * above_world_pos[0] + above_world_pos[1] * above_world_pos[1]) > 158.875:
-                        above_world_pos[0] = above_world_pos[0] * 0.98
-                        above_world_pos[1] = above_world_pos[1] * 0.98
-                    phi = phi - np.pi/18.0
-                else:
-                    break
-
-                if phi <= 0:
-                    break
-
-        # Try horizontal reach with phi = 0.0
-        if not reachable_high or not reachable_low:
-            target_world_pos = copy.deepcopy(_target_world_pos)
-            above_world_pos = copy.deepcopy(_target_world_pos)
-            if _target_world_pos[2] >= 38*4+10 and to_sky:
-                target_world_pos[1] = target_world_pos[1] - 13
-                above_world_pos[1] = above_world_pos[1] - 13
-            target_world_pos[2] = target_world_pos[2] + 12
-            above_world_pos[2] = above_world_pos[2] + 12 + 80
-            reachable_low, joint_angles_2 = IK_geometric([target_world_pos[0], 
-                                                        target_world_pos[1],
-                                                        target_world_pos[2],
-                                                        0.0])
-
-            while not reachable_high:
-                reachable_high, joint_angles_1 = IK_geometric([above_world_pos[0], 
-                                                            above_world_pos[1],
-                                                            above_world_pos[2],
-                                                            0.0])
-                # if 0.95* math.sqrt(above_world_pos[0] * above_world_pos[0] + above_world_pos[1] * above_world_pos[1]) > 158.875:
-                #         above_world_pos[0] = above_world_pos[0] * 0.95
-                #         above_world_pos[1] = above_world_pos[1] * 0.95
-                if reachable_high:
-                    break
-                if above_world_pos[2] - target_world_pos[2] > 40:
-                    above_world_pos[2] = above_world_pos[2] - 10
-                else:
-                    break
-
-        # Unreachable
-        if not reachable_high or not reachable_low:
-            if not self.next_state == "estop":
-                self.next_state = "idle"
-            print("[PLACE]  Target point is unreachable, remain idle!!!")
-            return False
-
-        ############ Executing #############
-        # print("[PLACE]  Executing waypoints...")
-        # !!! TODO
-        # joint_angles_start = self.rxarm.get_positions()
-        joint_angles_start = [0, 0, 0, 0, 0]
-        if _target_world_pos[2] > 38*4+10:
-            joint_angles_start = self.rxarm.safe_pose
-
-        joint_angles_start[0] = joint_angles_1[0]
-        # move_time = np.abs(joint_angles_1[0] - joint_angles_start[0]) / (np.pi/3)
-        # ac_time = move_time / 4
-        if not to_sky:
-            move_time, ac_time = self.calMoveTime(joint_angles_start)
-            print("move time: ", move_time)
-            self.rxarm.arm.set_single_joint_position("waist", joint_angles_1[0], moving_time=move_time, accel_time=ac_time, blocking=True)
-        else:
-            move_time, ac_time = self.calMoveTime(self.rxarm.safe_pose)
-            self.rxarm.arm.set_joint_positions(self.rxarm.safe_pose,
-                                            moving_time=move_time,
-                                            accel_time=ac_time,
-                                            blocking=True)
-
-        # 1. go to point above target pose
-        joint_angles_1[-2] = joint_angles_1[-2] + place_wrist_offset
-        move_time, ac_time = self.calMoveTime(joint_angles_1)
-        self.rxarm.arm.set_joint_positions(joint_angles_1,
-                                        moving_time=move_time,
-                                        accel_time=ac_time,
-                                        blocking=True)
-
-        # 2. go to target pose 
-        joint_angles_2[-2] = joint_angles_2[-2] + place_wrist_offset
-        displacement = np.array(joint_angles_2) - np.array(joint_angles_1)
-        displacement_unit =  displacement
-
-        current_effort = self.rxarm.get_efforts()
-        print("initial: ", current_effort)
-        temp_joint = np.array(joint_angles_1)
-        for i in range(10):
-            # current_effort = self.rxarm.get_efforts()
-            # print("initial: ", current_effort)
-            displacement_unit = displacement_unit / 2
-            temp_joint = temp_joint + displacement_unit
-            move_time, ac_time = self.calMoveTime(temp_joint)
-            self.rxarm.arm.set_joint_positions(temp_joint.tolist(),
-                                            moving_time=move_time,
-                                            accel_time=ac_time,
-                                            blocking=True)
-            time.sleep(0.1)
-            if i > 0:
-                break
-        
-        reachable_push, joint_angles_3 = IK_geometric([push_pos[0], 
-                                                        push_pos[1],
-                                                        push_pos[2],
-                                                        phi])
-        self.rxarm.arm.set_joint_positions(joint_angles_3,
-                                        moving_time=2.0,
-                                        accel_time=1.0,
-                                        blocking=True)
-
-        self.rxarm.open_gripper()
-        self.rxarm.gripper_state = False
-        
-        move_time, ac_time = self.calMoveTime(joint_angles_1)
-        self.rxarm.arm.set_joint_positions(joint_angles_1,
-                                        moving_time=move_time,
-                                        accel_time=ac_time,
-                                        blocking=True)
-
-        joint_angles_end = copy.copy(joint_angles_1)
-        joint_angles_end[1] = -np.pi/6
-        joint_angles_end[2] = 0
-        joint_angles_end[3] = -np.pi/2
-        joint_angles_end[4] = 0
-        if _target_world_pos[2] >= 38*4+10:
-            joint_angles_end[1] = -np.pi/3
-
-        move_time, ac_time = self.calMoveTime(joint_angles_end)
-        self.rxarm.arm.set_joint_positions(joint_angles_end,
-                                        moving_time=move_time,
-                                        accel_time=ac_time,
-                                        blocking=True)
-        # print("[PLACE]  Place finished!")
-        return True
 
     def get_block_xyz_from_click(self, click_uvd):
         """!

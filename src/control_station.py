@@ -48,21 +48,34 @@ class Gui(QMainWindow):
         # ---------------------------
         # BLOCK SELECTION UI
         # ---------------------------
+        # self.class_names = [
+        #     "small_red_sphere", "small_red_cube",
+        #     "small_orange_sphere", "small_orange_cube",
+        #     "small_yellow_sphere", "small_yellow_cube",
+        #     "small_green_sphere", "small_green_cube",
+        #     "small_blue_sphere", "small_blue_cube",
+        #     "small_purple_sphere", "small_purple_cube",
+        #     "large_red_sphere", "large_red_cube",
+        #     "large_orange_sphere", "large_orange_cube",
+        #     "large_yellow_sphere", "large_yellow_cube",
+        #     "large_green_sphere", "large_green_cube",
+        #     "large_blue_sphere", "large_blue_cube",
+        #     "large_purple_sphere", "large_purple_cube"
+        # ]
         self.class_names = [
-            "small_red_sphere", "small_red_cube",
-            "small_orange_sphere", "small_orange_cube",
-            "small_yellow_sphere", "small_yellow_cube",
-            "small_green_sphere", "small_green_cube",
-            "small_blue_sphere", "small_blue_cube",
-            "small_purple_sphere", "small_purple_cube",
-            "large_red_sphere", "large_red_cube",
-            "large_orange_sphere", "large_orange_cube",
-            "large_yellow_sphere", "large_yellow_cube",
-            "large_green_sphere", "large_green_cube",
-            "large_blue_sphere", "large_blue_cube",
-            "large_purple_sphere", "large_purple_cube"
+             "small_red_cube",
+            "small_orange_cube",
+             "small_yellow_cube",
+             "small_green_cube",
+             "small_blue_cube",
+             "small_purple_cube",
+             "large_red_cube",
+             "large_orange_cube",
+             "large_yellow_cube",
+             "large_green_cube",
+             "large_blue_cube",
+             "large_purple_cube"
         ]
-
         # Label
         self.task_label = QLabel("Select up to 3 target classes:")
 
@@ -71,10 +84,16 @@ class Gui(QMainWindow):
         self.combo2 = QComboBox()
         self.combo3 = QComboBox()
 
-        for c in self.class_names:
-            self.combo1.addItem(c)
-            self.combo2.addItem(c)
-            self.combo3.addItem(c)
+        # for c in self.class_names:
+        #     self.combo1.addItem(c)
+        #     self.combo2.addItem(c)
+        #     self.combo3.addItem(c)
+        for combo in [self.combo1, self.combo2, self.combo3]:
+            combo.addItem("")  # Empty string or "Select..." as placeholder
+            for c in self.class_names:
+                combo.addItem(c)
+            combo.setCurrentIndex(0)  # Select the empty item
+
 
         # SORT button
         self.sort_button = QPushButton("SORT")
@@ -417,16 +436,23 @@ o
         return selected
     
     def startSorting(self):
+        
         selected = self.getSelectedBlocks()
+        selected = [choice for choice in selected if choice != ""]
+
         if len(selected) == 0:
+            print('editing status')
             self.ui.rdoutStatus.setText("no targets selected")
             return
-
+        
+        
         self.ui.rdoutStatus.setText(f"Sorting {len(selected)} classes...")
+        
         targets = self.camera.get_target_locs(selected)
         
         if len(targets) == 0:
             print("returning from startSorting")
+            return
 
         self.rxarm.arm.go_to_home_pose(moving_time=2,
                                         accel_time=0.5,
@@ -447,8 +473,19 @@ o
                 #   target_world_pos[2] = height
                     target_world_pos[2] = 0
                     self.sm.auto_place(target_world_pos)
+                elif 'bin2' in self.camera.bin_rectangles:
+                    bin2 = self.camera.bin_rectangles['bin2']
+
+                    target_world_pos = [0,0,0]
+                    target_world_pos[0] = bin2['center'][0]
+                    target_world_pos[1] = bin2['center'][1]
+                #   target_world_pos[2] = height
+                    target_world_pos[2] = 0
+                    self.sm.auto_place(target_world_pos)
                 else:
                     self.rxarm.gripper_release()
+
+        print("sort complete")
 
     def startSorting2(self):
         selected = self.getSelectedBlocks()
